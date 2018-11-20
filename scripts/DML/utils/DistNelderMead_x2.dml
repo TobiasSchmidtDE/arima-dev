@@ -1,0 +1,252 @@
+#This is Distributed Nelder Mead that is running correctly for ob fun min sum(x^2)/n. 
+#Other distributed nelder meads are meant for debugging. 
+# Do Not Change this one
+
+
+
+# all points are saved as 1 x dimension form
+# simplex is dimension x (dimension + 1) matrix
+# initial simplex
+
+alpha = 1
+gamma = 2
+rho = -0.5
+sigma = 0.5
+
+
+dimension = 10
+#guess = matrix(1.0,rows=dimension,cols=1)  
+guess = Rand(rows=dimension,cols=1,min=-1, max=1)
+
+iter = 0
+maxiter = 1000
+tol = 0.001
+
+
+
+
+
+step = 1.0
+simplex = matrix(0.0,rows=dimension,cols=dimension+1)
+simplex[ ,1] = guess
+for(i in 2:dimension + 1){
+	simplex[ ,i] = guess
+	simplex[i-1,i] = simplex[i-1,i]+step
+}
+# evaluating objective at each point in simplex
+obj = matrix(0.0,rows=1,cols=dimension+1)
+for(k in 1:dimension+1,check=0){
+	temp = simplex[,k]
+	foo = obja(temp)
+	obj[1,k] = foo	
+	#print("k "+ k +" obj "+ castAsScalar(obj[1,k]))	
+}
+
+proc = 3
+po = round((dimension + 1)/proc)
+
+points_on_proc = matrix(0,rows=1,cols=proc)
+for(j in 1:proc){
+	if (j<proc){
+		points_on_proc[ ,j] = po
+		}
+	else {
+	points_on_proc[ ,j] = dimension+1-(proc-1)*po
+	}
+}
+
+best_ind = matrix(0,rows=1,cols=proc)
+best_value = matrix(0.0,rows=1,cols=proc)
+worst_ind = matrix(0,rows=1,cols=proc)
+second_worst_ind = matrix(0,rows=1,cols=proc)
+gM = matrix(0.0,rows=dimension,cols=proc)
+worst_indicator = matrix(1.0,rows=1,cols=proc) # flag the processor if worst point got updated
+
+
+
+
+
+best = 1
+worst = 1
+secw = 1
+iter = 0
+gbest = castAsScalar(obj[1,best])
+
+
+while( gbest > tol){
+parfor(i in 1:proc,check=0){
+	if (i < proc){
+		l2 = i*castAsScalar(points_on_proc[,i])
+		l1 = l2 - castAsScalar(points_on_proc[,i]) + 1
+		}
+	else {
+		l2 = dimension + 1;
+		riz = sum(points_on_proc[1,1:i-1])
+		l1 = l2 - (l2 - riz) + 1 
+	}
+
+	#print("l1 " + l1+ " l2 "+l2)
+	local_simplex = simplex[,l1:l2] 
+	local_obj = obj[,l1:l2]
+
+	#sort objective value and store indices
+	lbest = 1
+	lworst = 1
+	for(j in 2:ncol(local_obj)){
+		this = castAsScalar(local_obj[1,j])
+		that = castAsScalar(local_obj[1,lbest])
+  		if(that > this){
+    		lbest = j
+  		}
+  		
+  		that = castAsScalar(local_obj[1,lworst])
+  		if(that < this){
+    		lworst = j
+  		}
+	}
+	
+	#print("worst ind " + lworst +", worst_obj "+ castAsScalar(local_obj[1,lworst]))
+
+	lsecw = lbest
+	for(j in 1:ncol(local_obj)){
+		this = castAsScalar(local_obj[1,j])
+		that = castAsScalar(local_obj[1,lsecw])
+		if(j != lworst & that < this){
+   			lsecw = j
+		}
+	}
+
+	#print("second worst ind " + lsecw +", second worst_obj "+ castAsScalar(local_obj[1,lsecw]))
+
+	# calculate centroid w/o worst
+
+	lM = matrix(0.0,rows=dimension,cols=1)
+	for(p in 1:dimension){
+		lM[p,1] = (sum(local_simplex[p,]) - local_simplex[p,lworst])/(ncol(local_simplex) - 1)
+	}		
+	/*
+	for(p in 1:dimension){
+	print("p "+castAsScalar(M[p,1]))
+	}*/
+	best_ind[1,i] = lbest + l1 - 1
+	best_value[1,i] = castAsScalar(local_obj[1,lbest])
+	worst_ind[1,i] = lworst + l1 - 1
+	second_worst_ind[1,i] = lsecw + l1 - 1
+	gM[,i] = lM
+	#print("best ind " + castAsScalar(best_ind[1,i]) +", best_obj "+ castAsScalar(local_obj[1,lbest]))
+	#print("for loop 1 "+i)
+} #first parfor-end to store local best, worst, second worst and local centroid
+
+M = matrix(0.0,rows=dimension,cols=1) # global centroid
+for(p in 1:dimension){
+	M[p,1] = sum(gM[p,])/proc
+}
+#print("p ro c " + proc)
+/*for(iq in 1:proc,check=0){
+	jthis = castAsScalar(best_ind[1,iq])
+	#print("pr i q "+iq)
+	#print("best values  " + castAsScalar(best_value[1,iq]))
+	print("i t e r "+iter+" cluster num "+iq +" best values over each cluster " + castAsScalar(obj[1,jthis]))
+}*/
+
+
+mebest = 1;
+
+for(j in 2:proc){
+	jthis = castAsScalar(best_ind[1,j])
+	#print("j t hi s "+ jthis)
+	foothis = castAsScalar(obj[1,jthis])
+	jthat = castAsScalar(best_ind[1,mebest])
+	foothat = castAsScalar(obj[1,jthat])
+	if(foothat > foothis){
+   		mebest = j
+	}
+}
+indBest = castAsScalar(best_ind[1,mebest])
+print("best so far " + castAsScalar(obj[1,indBest]))
+#print("global best ind  " + indBest)
+
+gbest = castAsScalar(obj[1,indBest])
+
+parfor(i in 1:proc,check=0){
+	# Reflection
+	
+	xR = M[,1]+ alpha*(M[,1] - simplex[, castAsScalar(worst_ind[1,i])])
+	/*
+	for(p in 1:dimension){
+		print("p "+castAsScalar(xR[p,1]))
+	}*/
+
+	fR = obja(xR)
+	#print("f R - " +  fR)
+
+	if(gbest <= fR & fR < castAsScalar(obj[1, castAsScalar(second_worst_ind[1,i])])){
+		simplex[,castAsScalar(worst_ind[1,i])] = xR
+		obj[1,castAsScalar(worst_ind[1,i])] = fR
+		print("reflection point taken")
+	} else {
+		if(fR < gbest){
+			xE = M[,1] + gamma*(M[,1] - simplex[,castAsScalar(worst_ind[1,i])])
+			fE = obja(xE)
+			if(fE < fR){
+				simplex[,castAsScalar(worst_ind[1,i])] = xE
+				obj[1,castAsScalar(worst_ind[1,i])] = fE
+				print("expansion point taken")
+			} else {
+				simplex[,castAsScalar(worst_ind[1,i])] = xR
+				obj[1,castAsScalar(worst_ind[1,i])] = fR
+				print("expansion did not help keeping reflection point")
+			}
+		} else {
+			xC = M[,1] + rho*(M[,1] - simplex[,castAsScalar(worst_ind[1,i])])
+			fC = obja(xC)
+			if(fC < castAsScalar(obj[1,castAsScalar(worst_ind[1,i])])){
+				simplex[,castAsScalar(worst_ind[1,i])] = xC
+				obj[1,castAsScalar(worst_ind[1,i])] = fC
+				print("contraction point taken")
+			} else {
+				print("consider reduction-------------------!!!!!!!!!!!!!!!!!!!!!!")
+				worst_indicator[1,i] = 0 
+			}
+		}
+	}
+}#Second parfor-end
+
+if(sum(worst_indicator)==0){
+	print("Shrink")
+	parfor(p in 1:dimension+1,check=0){
+		if(p != indBest){
+			temp = simplex[,indBest] + sigma*(simplex[,p] - simplex[,indBest])
+			simplex[,p] = temp
+			foo = obja(temp)
+			obj[1,p] = foo
+		}
+	}
+} else{
+	print("Update")
+}
+print("i t er "+ iter)
+
+iter = iter + 1
+}
+
+print("global best------------------- " + gbest + " Total num of iterations "+ iter)
+
+
+
+
+
+
+
+
+
+
+
+# Functions called in to run DistNelderMead
+obja = function (Matrix[Double] x) return (Double s){
+	s = sum(x^2)/nrow(x)
+	if(1==1){}
+}
+	
+
+ 

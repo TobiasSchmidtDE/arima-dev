@@ -1,0 +1,34 @@
+nrows = ifdef($rows, 1000)
+s = ifdef($s, 10)
+weight_season = ifdef($season_weight, 1)
+weight_randomwalk = ifdef($randomwalk_weight, 1)
+weight_noise = ifdef($whitenoise_weight, 0)
+dest = ifdef($dest, "timeseries.csv")
+fileformat = ifdef($format, "csv")
+print("\ngenerating times series data with")
+print("season_weight = " + weight_season)
+print("randomwalk_weight = " + weight_randomwalk)
+print("whitenoise_weight = " + weight_noise)
+print("s = " + s)
+print("dest = " + dest)
+print("fileformat = " + fileformat)
+
+
+whiteNoise = rand(rows=nrows, cols=1, min=0, max=1, sparsity=1, pdf="normal")
+
+randomWalk = matrix(0, rows=nrows, cols=1)
+randomWalk[1,1] = whiteNoise[1,1]
+for (i in 2:nrows){
+	randomWalk[i, 1] = randomWalk[i-1, 1] + whiteNoise[i,1]
+}
+
+X = matrix(0, rows=nrows, cols=1)
+step = 0.1
+
+for (i in 1:nrows){
+	X[i,1]= (i/s) * 2 * pi
+}
+seasonality = sin(X)
+timeseries = seasonality*weight_season + randomWalk*weight_randomwalk + whiteNoise*weight_noise
+write(timeseries, dest, format=fileformat)
+

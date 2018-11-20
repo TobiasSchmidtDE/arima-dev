@@ -1,0 +1,1 @@
+spark-submit %systemmljar% -f "C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\dmlscripts\arima.dml" -exec singlenode -nvargs X="C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\dml_test_scripts\pythondump.csv" p=1 P=1

@@ -1,0 +1,10 @@
+{
+    "data_type": "matrix",
+    "value_type": "double",
+    "rows": 1000,
+    "cols": 1,
+    "format": "csv",
+    "header": false,
+    "sep": ",",
+    "description": { "author": "TobiasSchmidt" }
+}

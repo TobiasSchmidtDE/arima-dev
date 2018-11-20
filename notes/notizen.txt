@@ -1,0 +1,48 @@
+Warum wann welche Gleichung zu lösen?
+Wie kommt man auf die GLS warum benötigt. Was wird berechnet?
+Besser seperieren zwsichen Optimierungsverfahren und zu Optimierender Funktion
+Struktur überarbeiten -> Erst Optimizer dann was ist ARIMA
+
+Jacobi --> Iterationsformel herleiten
+
+
+Almaden anfragen:
+Optimierungsverfahren von SystemML -> Welche Algorithmen im Optimizer genutzt?
+
+Welche Lin GLS Optimierer werden verwendet?
+	default "Solve()" ist direct solver und nicht geeignet für große Matrizen
+Vorschläge für Lin GLS Optimierer
+	Forward/Backward Substitution
+	CG
+		Mit Tanspose A -> nur wenn A regulär
+		MM Conplexität < O(n^2) weil sparse
+	
+
+Vorgehen Studienarbeit:
+
+1. Implementierung jUnit Test (SystemML)
+		korrektheitstest (vergleich R und DML script) für AR, SAR, MA, SMA, ARIMA, SARIMA
+			Endergebnis
+			Residuals
+2. Fertigstellung additive SARIMA script mit Jacobi solver und BFGS Optimizer und Conditional Sum of Squares
+3. Performance Tests von SARIMA auf Almaden Research Cluster
+4. Analyse Performance Tests (Bottle necks) --> hoffentlich lin sys solver
+5. CG lin sys solver implementieren
+6. Performancevergleich CG und Jacobi 
+7. Performance Tests von SARIMA auf Almaden Research Cluster
+8. Analyse Performance Tests (Bottle necks) --> next steps
+
+
+Studienarbeit
+Theorie	
+	additive ARIMA
+	kein optimizer
+	lin solver
+		warum nicht direkt? (abhängigkeiten -> paralleisierbar?
+		jacobi 
+		cg
+		
+
+	
+
+

@@ -1,0 +1,12 @@
+{
+    "data_type": "matrix",
+    "value_type": "double",
+    "rows": 1,
+    "cols": 1,
+    "nnz": 1,
+    "format": "csv",
+    "header": false,
+    "sep": ",",
+    "author": "TobiasSchmidt",
+    "created": "2018-08-16 17:33:21 EDT"
+}

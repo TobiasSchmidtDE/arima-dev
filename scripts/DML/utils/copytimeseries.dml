@@ -1,0 +1,1 @@
+M = read('testtimeseries10M.csv') tenTimesM = M for (i in 2:10){tenTimesM = rbind(tenTimesM, M)} write(tenTimesM, 'testtimeseries100M.csv', "csv")

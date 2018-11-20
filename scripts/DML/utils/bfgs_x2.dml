@@ -1,0 +1,103 @@
+
+# Function that we are minimizing
+obj1 = function (Matrix[Double] x) return (Double s){
+	s = sum(x^2)/nrow(x)
+	if(1==1){}
+}
+
+# obj1 Function gradient
+objGradient1 = function(Matrix[Double] x) return (Matrix[Double] y){
+	if(ncol(x)!=1){
+		print("check input for objGradient1")
+	} else{
+		y = matrix(0.0,rows=nrow(x),cols=ncol(x))
+		for(i in 1:nrow(x)){
+		y[i,1] = 2*x[i,1]/nrow(x)
+		}
+	}
+}
+
+
+
+##################BFGS##########
+# Author - Deepti Pachauri
+# Date - 07/19/2013
+# PARAMETERS
+tol = 0.00001
+c1 = .1
+c2 = 0.99
+alpha = 0.0
+unf = 1000000000000.00
+beta = unf # how to define INF
+t = 1 
+
+
+x = Rand(rows=45,cols=1,min=-10,max=10) # Initial guess x
+fx = obj1(x) # function value at initial x
+gx = objGradient1(x) # gradient at initial x
+
+dg = matrix(1,rows=nrow(x),cols=1)
+B = diag(dg) # This is inv(B) 
+
+d = - B%*%gx # Initial direction of descent
+
+agx = max(abs(gx)) # infinity norm of descent direction at x
+
+iter = 0
+maxiter = 1000
+
+while(agx > tol*(1+abs(fx)) & iter < maxiter){
+#### Bisection Line search #### 
+	wwolfe = true
+	tk = t;
+	xtemp = 0.0;
+	fxtemp = 0.0
+	gxtemp = matrix(0.0,rows=nrow(x),cols=1)
+	#while(wwolfe & biter < mbiter)
+	while(wwolfe){
+		xtemp = x + tk*d
+		fxtemp = obj1(xtemp)
+		gxtemp = objGradient1(xtemp)
+		
+		if(fxtemp > fx + c1*tk*castAsScalar(t(d)%*%gx)){
+			beta = tk
+			tk = 0.5*(alpha + beta)
+		} else{
+			if(castAsScalar(t(d)%*%gxtemp) < c2*castAsScalar(t(d)%*%gx)){
+				alpha = tk
+				if(beta==unf){
+					tk = 2*alpha
+				} else{
+					tk = 0.5*(alpha + beta)
+				}
+			} else {
+				wwolfe = false
+			}
+		}
+	}
+##################################	
+	xk = x + tk*d
+	s = tk*d
+	fxk = obj1(xk)
+	gxk = objGradient1(xk) 
+	yk = gxk - gx
+# inverse B for next step ###############
+	FT = castAsScalar(t(s)%*%yk + t(yk)%*%B%*%yk)*s%*%t(s)/castAsScalar(t(s)%*%yk)^2
+	ST = (B%*%(yk%*%t(s)) + (s%*%t(yk))%*%B)/castAsScalar(t(s)%*%yk)
+	B = B + FT - ST
+##########################################	
+	print("iteration " + iter + " fx "+ fx)
+	x = xk
+	fx = fxk
+	gx = gxk
+	d = - B%*%gx
+	agx = max(abs(gx)) 
+	iter = iter + 1
+}
+
+print("dimension "+ nrow(x))
+print("global best " + fx)
+
+
+
+

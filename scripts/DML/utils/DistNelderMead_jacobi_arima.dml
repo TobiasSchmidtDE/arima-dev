@@ -1,0 +1,382 @@
+# Arguments
+# 1st arg: X (one column time series)
+# 2nd arg: p (non-seasonal AR order)
+# 3rd arg: d (non-seasonal differencing order)
+# 4th arg: q (non-seasonal MA order)
+# 5th arg: P (seasonal AR order)
+# 6th arg: D (seasonal differencing order)
+# 7th arg: Q (seasonal MA order)
+# 8th arg: s (period in terms of number of time-steps)
+# 9th arg: 0/1 (1 means include.mean)
+# 10th arg: file name to store learnt parameters
+
+# all points are saved as 1 x dimension form
+# simplex is dimension x (dimension + 1) matrix
+# initial simplex
+
+alpha = 1
+gamma = 2
+rho = -0.5
+sigma = 0.5
+
+X = read($1)#time series
+num_rows = nrow(X)
+/*print(num_rows)
+for(i in 1:num_rows){
+print(castAsScalar(X[i,1]))
+}*/
+
+
+#non-seasonal order
+p = $2
+d = $3
+q = $4
+
+#seasonal order
+P = $5
+D = $6
+Q = $7
+
+#length of the season
+s = $8
+
+include_mean = $9
+
+
+if(num_rows <= d){
+	print("non-seasonal differencing order should be larger than length of the time-series")
+}
+
+
+Y = X
+for(i in 1:d){
+	n1 = nrow(Y)+0.0
+	Y = Y[2:n1,] - Y[1:n1-1,]
+}
+num_rows = nrow(Y)+0.0
+if(num_rows <= s*D){
+	print("seasonal differencing order should be larger than number of observations divided by length of season")
+}
+
+
+
+for(i in 1:D){
+	n1 = nrow(Y)+0.0
+	Y = Y[s+1:n1,] - Y[1:n1-s,]
+}
+
+n = nrow(Y)
+max_ar_col = s*P+p
+max_ma_col = s*Q+q
+if(max_ar_col > max_ma_col){
+	max_arma_col = max_ar_col
+}else{
+	max_arma_col = max_ma_col
+}
+
+totcols = 1+include_mean+P*p+P+p+Q*q+Q+q #target col (X), p-P cols, q-Q cols  
+#print("total cols " + totcols )
+
+
+Z = Rand(rows=n, cols=totcols, min=0, max=0)
+Z[,1] = Y #target col
+if(include_mean == 1){
+	constant_col = Rand(rows=n, cols=1, min=1, max=1)
+	Z[,1+include_mean] = constant_col
+}
+
+parfor(i1 in 1:p, check=0){
+	Z[i1+1:n,1+include_mean+i1] = Y[1:n-i1,]
+}
+parfor(i2 in 1:P){
+	parfor(j1 in 0:p, check=0){
+		Z[s*i2+j1+1:n,1+include_mean+p+(i2-1)*(p+1)+j1+1] = Y[1:n-s*i2-j1,]
+	}
+}
+parfor(i5 in 1:q, check=0){
+	Z[i5+1:n,1+include_mean+P*p+P+p+i5] = Y[1:n-i5,]
+}
+parfor(i6 in 1:Q){
+	parfor(j2 in 0:q, check=0){
+		Z[s*i6+j2+1:n,1+include_mean+P*p+P+p+q+(i6-1)*(q+1)+j2+1] = Y[1:n-s*i6-j2,]
+	}
+}
+
+one = Rand(rows=1, cols=1, min=1, max=1)
+
+
+
+simplex = Rand(rows=totcols-1, cols=totcols, min=0, max=0)
+point = Rand(rows=totcols-1, cols=1, min=0, max=0)
+for(i in 2:ncol(simplex)){
+	point[i-1,1] = point[i-1,1] + 1
+	simplex[,i] = point
+}
+
+
+objvals = Rand(rows=1, cols=ncol(simplex), min=0, max=0)
+for(i3 in 1:ncol(simplex)){
+#parfor(i3 in 1:ncol(simplex),check=0){
+	arima_css_objval = arima_css(simplex[,i3], Z, p, P, q, Q, s, include_mean)
+	objvals[1,i3] = arima_css_objval*one
+}
+
+write(objvals[1,], $12, format="text")
+tol = 0.001
+dimension = totcols -1
+diff = tol+1.0
+
+
+
+proc = 2
+po = round((dimension + 1)/proc)
+points_on_proc = matrix(0,rows=1,cols=proc)
+for(j in 1:proc){
+	if (j<proc){
+		points_on_proc[ ,j] = po
+		print(j+"--"+castAsScalar(points_on_proc[ ,j]))
+		}
+	else {
+	points_on_proc[ ,j] = dimension+1-(proc-1)*po
+	print(j+"--"+castAsScalar(points_on_proc[ ,j]))
+	}
+}
+best_ind = matrix(0,rows=1,cols=proc)
+worst_ind = matrix(0,rows=1,cols=proc)
+second_worst_ind = matrix(0,rows=1,cols=proc)
+gM = matrix(0.0,rows=dimension,cols=proc)
+worst_indicator = matrix(1.0,rows=1,cols=proc) # flag the processor if worst point got updated
+
+
+best = 1
+worst = 1
+secw = 1
+iter = 0
+maxiter = 100
+
+gbest = castAsScalar(objvals[1,best])
+
+
+while(gbest > tol & iter < maxiter){
+#for(i in 1:proc,check=0){
+parfor(i in 1:proc,check=0){
+		if (i < proc){
+			l2 = i*castAsScalar(points_on_proc[1,i])
+			l1 = l2 - castAsScalar(points_on_proc[1,i]) + 1
+		} else {
+			if(proc == 1){
+				l2 = dimension + 1
+				l1 = 1
+			}else{
+				l2 = dimension + 1
+				riz = sum(points_on_proc[1,1:i-1])
+				l1 = l2 - (l2 - riz) + 1  
+			}  
+		}
+	
+	print("l1 " + l1+ " l2 "+l2)
+	local_simplex = simplex[,l1:l2] 
+	local_obj = objvals[,l1:l2]
+
+	#sort objective value and store indices
+	lbest = 1
+	lworst = 1
+	for(j in 2:ncol(local_obj)){
+		this = castAsScalar(local_obj[1,j])
+		that = castAsScalar(local_obj[1,lbest])
+  		if(that > this){
+    		lbest = j
+  		}
+  		
+  		that = castAsScalar(local_obj[1,lworst])
+  		if(that < this){
+    		lworst = j
+  		}
+	}
+	print("best ind " + lbest +", best_obj "+ castAsScalar(local_obj[1,lbest]))
+	#print("worst ind " + lworst +", worst_obj "+ castAsScalar(local_obj[1,lworst]))
+
+	lsecw = lbest
+	for(j in 1:ncol(local_obj)){
+		this = castAsScalar(local_obj[1,j])
+		that = castAsScalar(local_obj[1,lsecw])
+		if(j != lworst & that < this){
+   			lsecw = j
+		}
+	}
+
+	#print("second worst ind " + lsecw +", second worst_obj "+ castAsScalar(local_obj[1,lsecw]))
+
+	# calculate centroid w/o worst
+
+	lM = matrix(0.0,rows=dimension,cols=1)
+	for(ip in 1:dimension){
+		lM[ip,1] = (sum(local_simplex[ip,]) - local_simplex[ip,lworst])/(ncol(local_simplex) - 1)
+	}		
+	/*
+	for(ip in 1:dimension){
+	print("ip "+castAsScalar(lM[ip,1]))
+	}*/
+	best_ind[1,i] = lbest + l1 - 1
+	worst_ind[1,i] = lworst + l1 - 1
+	second_worst_ind[1,i] = lsecw + l1 - 1
+	gM[,i] = lM
+	
+} #first parfor-end to store local best, worst, second worst and local centroid
+
+print("first par for finished")
+M = matrix(0.0,rows=dimension,cols=1) # global centroid
+for(ip in 1:dimension){
+	M[ip,1] = sum(gM[ip,])/proc
+}
+
+#print("n c o l " + n_col)
+
+
+mebest = 1; 
+/*
+for(iq in 1:proc){
+	jthis = castAsScalar(best_ind[1,iq])
+	print("j t h i s "+iq)
+	#print("b es t values  " + castAsScalar(best_value[1,iq]))
+	print("b es t values over each cluster " + castAsScalar(objvals[1,jthis]))
+}*/
+
+if(proc == 1){
+	#print("simplex not distributed")
+	mebest = 1
+}else {
+	for(j in 2:proc){
+		jthis = castAsScalar(best_ind[1,j])
+		foothis = castAsScalar(objvals[1,jthis])
+		jthat = castAsScalar(best_ind[1,mebest])
+		foothat = castAsScalar(objvals[1,jthat])
+		if(foothat > foothis){
+  				mebest = j
+		}
+	}
+}
+indBest = castAsScalar(best_ind[1,mebest])
+print("global best ind  " + indBest +" best so far " + castAsScalar(objvals[1,indBest]))
+
+gbest = castAsScalar(objvals[1,indBest])
+print("starting second par for for i t e r "+iter)
+#for(i in 1:proc,check=0){
+parfor(i in 1:proc,check=0){
+	# Reflection
+	
+	xR = M[,1]+ alpha*(M[,1] - simplex[, castAsScalar(worst_ind[1,i])])
+	/*
+	for(p in 1:dimension){
+		print("p "+castAsScalar(xR[p,1]))
+	}*/
+
+	#fR = obja(xR)
+	fR = arima_css(xR, Z, p, P, q, Q, s, include_mean)
+	
+	#print("f R - " +  fR)
+
+	if(gbest <= fR & fR < castAsScalar(objvals[1, castAsScalar(second_worst_ind[1,i])])){
+		simplex[,castAsScalar(worst_ind[1,i])] = xR
+		objvals[1,castAsScalar(worst_ind[1,i])] = fR
+		print("reflection point taken")
+	} else {
+		if(fR < gbest){
+			xE = M[,1] + gamma*(M[,1] - simplex[,castAsScalar(worst_ind[1,i])])
+			#fE = obja(xE)
+			fE = arima_css(xE, Z, p, P, q, Q, s, include_mean)
+			if(fE < fR){
+				simplex[,castAsScalar(worst_ind[1,i])] = xE
+				objvals[1,castAsScalar(worst_ind[1,i])] = fE
+				print("expansion point taken")
+			} else {
+				simplex[,castAsScalar(worst_ind[1,i])] = xR
+				objvals[1,castAsScalar(worst_ind[1,i])] = fR
+				print("expansion did not help keeping reflection point")
+			}
+		} else {
+			xC = M[,1] + rho*(M[,1] - simplex[,castAsScalar(worst_ind[1,i])])
+			#fC = obja(xC)
+			fC = arima_css(xC, Z, p, P, q, Q, s, include_mean)
+			if(fC < castAsScalar(objvals[1,castAsScalar(worst_ind[1,i])])){
+				simplex[,castAsScalar(worst_ind[1,i])] = xC
+				objvals[1,castAsScalar(worst_ind[1,i])] = fC
+				print("contraction point taken")
+			} else {
+				print("consider reduction-------------------!!!!!!!!!!!!!!!!!!!!!!")
+				worst_indicator[1,i] = 0 
+			}
+		}
+	}
+}#Second parfor-end
+
+if(sum(worst_indicator)==0){
+	print("Shrink")
+	#parfor(il in 1:dimension+1,check=0){
+	for(il in 1:dimension+1,check=0){
+		if(il != indBest){
+			temp = simplex[,indBest] + sigma*(simplex[,il] - simplex[,indBest])
+			simplex[,il] = temp
+			#foo = obja(temp)
+			foo = arima_css(temp, Z, p, P, q, Q, s, include_mean)
+			objvals[1,il] = foo
+		}
+	}
+} else{
+	print("Update")
+}
+
+iter = iter + 1
+print("i-t-e-r "+ iter)
+}
+
+print("global best by serial nelder mead------------------- " + castAsScalar(objvals[1,indBest]) + " Total num of iterations "+ iter)
+write(objvals[1,], $11, format="text")
+best_point = simplex[,indBest]
+write(best_point, $10, format="text")
+
+
+
+
+
+#function value for a given parameter w
+arima_css = function(Matrix[Double] w, Matrix[Double] X, Integer p, Integer P, Integer q, Integer Q, Integer s, Integer include_mean) return (Double obj){
+	b = X[,2:ncol(X)]%*%w
+	
+	R = Rand(rows=nrow(X), cols=nrow(X), min=0, max=0)
+	for(i7 in 1:q){
+		ma_ind_ns = include_mean+P*p+P+p+i7
+		err_ind_ns = i7
+		ones_ns = Rand(rows=nrow(R)-err_ind_ns, cols=1, min=1, max=1)
+		d_ns = ones_ns * castAsScalar(w[ma_ind_ns,1])
+		R[1+err_ind_ns:nrow(R),1:ncol(R)-err_ind_ns] = R[1+err_ind_ns:nrow(R),1:ncol(R)-err_ind_ns] + diag(d_ns)
+	}
+	for(i8 in 1:Q){		
+		for(i9 in 0:q){
+			ma_ind_s = include_mean+P*p+P+p+q+(i8-1)*(q+1)+i9+1
+			err_ind_s = s*i8 + i9
+			ones_s = Rand(rows=nrow(R)-err_ind_s, cols=1, min=1, max=1)
+			d_s = ones_s * castAsScalar(w[ma_ind_s,1])
+			R[1+err_ind_s:nrow(R),1:ncol(R)-err_ind_s] = R[1+err_ind_s:nrow(R),1:ncol(R)-err_ind_s] + diag(d_s)
+		}
+	}
+	
+	max_iter = 100
+	tol = 0.01
+
+	y_hat = Rand(rows=nrow(X), cols=1, min=0, max=0)
+	iter = 0
+  	diff = tol+1.0
+	while(iter < max_iter & diff > tol){
+    	y_hat_new = b - R%*%y_hat
+    	diff = sum((y_hat_new-y_hat)*(y_hat_new-y_hat))
+    	y_hat = y_hat_new
+    	iter = iter + 1
+
+    	#print("Inner iter " + iter + ": " + diff)
+  	}
+  	#print("Inner loop " + iter + ": " + diff)
+  
+  	errs = X[,1] - y_hat
+  	obj = sum(errs*errs)
+}

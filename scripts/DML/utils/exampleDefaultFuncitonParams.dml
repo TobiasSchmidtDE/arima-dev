@@ -1,0 +1,18 @@
+foo1 = function(Matrix[Double] A=matrix(1, 300, 500), Matrix[Double] B, Double s = 7) return (Matrix[Double] C) {
+ while(FALSE){} # no inlining
+ C = A %*% B + s;
+}
+
+foo2 = function(Matrix[Double] A, Matrix[Double] B) return (Matrix[Double] C) {
+ while(FALSE}{) # no inlining
+ C = A %*% B + 7;
+}
+
+X1 = matrix(1, 300, 500)
+X2 = matrix(2, 500, 200)
+
+C = foo1(B=X2);
+D = foo2(X1, X2);
+
+if( sum(C!=D) > 0 )
+ print("ERROR: "+sum(C!=D)+" differences.")

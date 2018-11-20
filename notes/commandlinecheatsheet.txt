@@ -1,0 +1,21 @@
+local:
+
+spark-submit %systemmljar% -f C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\dmlscripts\arima.dml -args C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\dml_test_scripts\multiple_household_power_consumption\Individual_Households\MT_156-NoTimestamp-ElectricityLoadDiagramm2011_2014-master.csv 100 1 0 0 1 0 0 672 0 1 arimaResult.txt
+
+spark-submit %systemmljar% -f C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\dmlscripts\arima.dml -nvargs src="C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\dml_test_scripts\multiple_household_power_consumption\Individual_Households\MT_156-NoTimestamp-ElectricityLoadDiagramm2011_2014-master.csv" max_func_invoc=2 p=1 d=1 q=1 P=1 D=1 Q=1 s=672 include_mean=0 use_jacobi=1 dest="arimaResult.txt"
+
+original arima, pythondump args
+spark-submit %systemmljar% -f C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\systemml\src\test\scripts\applications\arima_box-jenkins\arima.dml -args "C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\dml_test_scripts\pythondump.csv" 15 1 1 1 1 1 1 250 0 1 "arimaResult.txt"
+
+modified arima, pythondump nvargs:
+spark-submit %systemmljar% -f C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\dmlscripts\arima.dml -nvargs src="C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\dml_test_scripts\pythondump.csv" max_func_invoc=5 p=1 d=1 q=1 P=1 D=1 Q=1 s=250 include_mean=0 use_jacobi=1 dest="arimaResult.txt"
+
+ssh de163360@dml1.almaden.ibm.com
+
+cluster:
+
+hdfs (hadoop distributed file system)
+
+hdfs dfs (runs a filesystem command)
+
+spark-submit systemml-1.1.0-src/target/SystemML.jar -f dmlscripts/arima.dml -nvargs src="SystemML/dml_test_scripts/multiple_household_power_consumption/Individual_Households/MT_156-NoTimestamp-ElectricityLoadDiagramm2011_2014-master.csv" max_func_invoc=1000 p=1 d=1 q=1 P=1 D=1 Q=1 s=672 include_mean=0 use_jacobi=1 dest="SystemML/arimaResult.txt"

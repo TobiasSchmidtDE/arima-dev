@@ -1,0 +1,65 @@
+# Function that we are minimizing
+obj1 = function (Matrix[Double] x) return (Double s){
+	s = sum(x^2)/nrow(x)
+	if(1==1){}
+}
+
+# obj1 Function gradient
+objGradient1 = function(Matrix[Double] x) return (Matrix[Double] y){
+	if(ncol(x)!=1){
+		print("check input for objGradient1")
+	} else{
+		y = matrix(0.0,rows=nrow(x),cols=ncol(x))
+		for(i in 1:nrow(x)){
+		y[i,1] = 2*x[i,1]/nrow(x)
+		}
+	}
+}
+
+############Conjugate Gradient Descent###########
+# Author - Deepti Pachauri
+# Date - 07/19/2013
+#####PARAMETERS####
+t = 1;
+alpha = 0.5;
+beta = 0.1;
+max_bkt = 100
+tol = 0.0001
+
+dimension = 10
+x = matrix(1.0,rows=dimension,cols=1) # Initial guess x
+fx = obj1(x) # function value at initial x
+gx = objGradient1(x) # gradient at initial x
+agx = (sum(gx^2))^0.5 # L2 norm of descent direction at x
+
+iter = 0
+maxiter = 1000
+while(agx > tol & iter < maxiter){
+	d = -gx
+#### Backtracking Line search ####
+	k = 0
+	tk = t
+	xnew = x + tk*d
+	fxnew = obj1(xnew)
+	#print("new "+fxnew)
+	foo = fx + alpha*tk*castAsScalar(t(d)%*%d)
+	#print("step size "+ foo)
+	while(fxnew > fx + alpha*tk*castAsScalar(t(d)%*%d)){
+		tk = beta*tk
+		xnew = x + tk*d
+		fxnew = obj1(xnew)
+		k = k+1
+	}
+ 	#print("step size at iter " + iter+" is "+ tk)
+	x = x + tk*d #constant step size
+	fx = obj1(x)
+	print("best so far "+fx)
+	gx = objGradient1(x)
+	agx = (sum(gx^2))^0.5
+	iter = iter + 1
+}
+
+print("global best " +fx + " Total number of iter "+iter)	
+	
+	
+

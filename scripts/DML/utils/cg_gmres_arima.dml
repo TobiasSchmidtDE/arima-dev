@@ -1,0 +1,241 @@
+# Arguments
+# 1st arg: X (one column time series)
+# 2nd arg: p (non-seasonal AR order)
+# 3rd arg: d (non-seasonal differencing order)
+# 4th arg: q (non-seasonal MA order)
+# 5th arg: P (seasonal AR order)
+# 6th arg: D (seasonal differencing order)
+# 7th arg: Q (seasonal MA order)
+# 8th arg: s (period in terms of number of time-steps)
+# 9th arg: 0/1 (1 means include.mean)
+# 10th arg: file name to store learnt parameters
+
+
+
+
+
+################ exact solver ################
+
+solve = externalFunction(Matrix[Double] a, Matrix[Double] b)  return(Matrix[Double] c)
+implemented in (classname="com.ibm.bi.dml.packagesupport.LinearSolverWrapperCP",exectype="mem")
+################################################
+#changing to additive sar since R's arima seems to do that
+
+arima_css = function(Matrix[Double] w, Matrix[Double] X, Integer p, Integer P, Integer q, Integer Q, Integer s) return (Double obj){
+	b = X[,2:ncol(X)]%*%w
+	r_X = 0
+	if(1==1){
+		r_X=nrow(X)
+	}
+	
+	R = Rand(rows=r_X, cols=r_X, min=0, max=0)
+	for(i7 in 1:q){
+		ma_ind_ns = P+p+i7
+		err_ind_ns = i7
+		ones_ns = Rand(rows=r_X-err_ind_ns, cols=1, min=1, max=1)
+		d_ns = ones_ns * castAsScalar(w[ma_ind_ns,1])
+		R[1+err_ind_ns:r_X,1:r_X-err_ind_ns] = R[1+err_ind_ns:r_X,1:r_X-err_ind_ns] + diag(d_ns)
+	}
+	for(i8 in 1:Q){
+		ma_ind_s = P+p+q+i8
+		err_ind_s = s*i8
+		ones_s = Rand(rows=r_X-err_ind_s, cols=1, min=1, max=1)
+		d_s = ones_s * castAsScalar(w[ma_ind_s,1])
+		R[1+err_ind_s:r_X,1:r_X-err_ind_s] = R[1+err_ind_s:r_X,1:r_X-err_ind_s] + diag(d_s)
+	}
+	dpq = matrix(1.0,rows=r_X,cols=1)
+	A = diag(dpq)+R
+	#print("r A "+nrow(A))
+	#print("c A "+ncol(A))
+	
+	ng = 10
+	mg = r_X
+	Sg = matrix(0.0,rows=r_X,cols=r_X)
+	Qg = matrix(0.0,rows=r_X,cols=ng+1)
+	Qg[,1] = b/sqrt(sum(b^2))
+	for(kg in 1:ng){
+		v = A%*%Qg[,kg]
+		for(k2 in 1:kg){
+			Sg[k2,kg] = t(v)%*%Qg[,k2]
+			v = v - castAsScalar(Sg[k2,kg])*Qg[,k2]
+		}
+		Qg[,kg+1] = v/sqrt(sum(v^2))
+		Sg[kg+1,kg] = sqrt(sum(v^2))
+	}	
+	Sag = Sg[1:ng,1:ng]
+	#print("r S a g " + nrow(Sag))
+	#print("c S a g " + ncol(Sag))
+	e1 = matrix(0.0,rows=ng,cols=1)
+	e1[1,1] = sqrt(sum(b^2))
+	y_hat = solve(Sag, e1)
+	xth =  Qg[,1:ng]%*%y_hat;
+		
+	#print("n g "+ng)
+	errs = X[,1] - xth
+	obj = sum(errs*errs)
+	
+}
+
+
+
+
+# arima_css Function gradient finite difference 
+objFDgr = function(Matrix[Double] x, Matrix[Double] X, Integer p, Integer P, Integer q, Integer Q, Integer s) return (Matrix[Double] y){
+	h = 0.001 #finite diff element
+	c_x = 0
+	r_x = 0
+	if(1==1){
+		c_x=ncol(x)
+		r_x=nrow(x)
+	}
+	if(c_x!=1){
+		print("check input for objFDgr")
+	} else{
+		y = matrix(0.0,rows=r_x,cols=1)
+		for(i in 1:r_x){
+		enew = matrix(0.0,rows=r_x,cols=1)
+		enew[i,1] = h
+		p1 = x + enew
+		p2 = x - enew
+		f1 = arima_css(p1, X, p, P, q, Q, s)
+		f2 = arima_css(p2, X, p, P, q, Q, s)
+		fooy = (f1 - f2)/(2*h)
+		y[i,1] = fooy
+		#print("f 1 "+castAsScalar(y[i,1]))
+		}
+	}
+}
+
+X = read($1)#time series
+
+if(1==1){
+	num_rows=nrow(X)
+}
+
+
+#non-seasonal order
+p = $2
+d = $3
+q = $4
+
+#seasonal order
+P = $5
+D = $6
+Q = $7
+
+#length of the season
+s = $8
+
+include_mean = $9
+
+
+
+if(num_rows <= d){
+	print("non-seasonal differencing order should be larger than length of the time-series")
+}
+
+
+Y = X
+for(i in 1:d){
+	n1 = num_rows+0.0
+	Y = Y[2:n1,] - Y[1:n1-1,]
+}
+if(1==1){
+	r_Y=nrow(Y)
+}
+
+if(r_Y <= s*D){
+	print("seasonal differencing order should be larger than number of observations divided by length of season")
+}
+
+
+
+for(i in 1:D){
+	n1 = r_Y+0.0
+	Y = Y[s+1:n1,] - Y[1:n1-s,]
+}
+
+
+max_ar_col = s*P+p
+max_ma_col = s*Q+q
+if(max_ar_col > max_ma_col){
+	max_arma_col = max_ar_col
+}else{
+	max_arma_col = max_ma_col
+}
+totcols = 1+p+P+Q+q #target col (X), p-P cols, q-Q cols
+#totcols = 1+include_mean+P*p+P+p+Q*q+Q+q #target col (X), p-P cols, q-Q cols  
+#print("total cols " + totcols )
+
+
+
+Z = Rand(rows=r_Y, cols=totcols, min=0, max=0)
+Z[,1] = Y #target col
+
+parfor(i1 in 1:p, check=0){
+	Z[i1+1:r_Y,1+i1] = Y[1:r_Y-i1,]
+}
+parfor(i2 in 1:P, check=0){
+	Z[s*i2+1:r_Y,1+p+i2] = Y[1:r_Y-s*i2,]
+}
+parfor(i5 in 1:q, check=0){
+	Z[i5+1:r_Y,1+P+p+i5] = Y[1:r_Y-i5,]
+}
+parfor(i6 in 1:Q, check=0){
+	Z[s*i6+1:r_Y,1+P+p+q+i6] = Y[1:r_Y-s*i6,]
+}
+
+
+
+#####PARAMETERS####
+t = 1;
+alpha = 0.0001;
+beta = 0.1;
+
+
+
+
+#x = matrix(1.0,rows=totcols -1,cols=1) # Initial guess x 
+
+x = Rand(rows=totcols -1,cols=1,min = 0.0,max=5.0) # Initial guess x 
+
+fx = arima_css(x, Z, p, P, q, Q, s)
+print("parameter for opt "+ nrow(x)+" f x " + fx)
+#tol = 1.5 * 10^(-8) * fx
+tol = .001
+gx = objFDgr(x, Z, p, P, q, Q, s)
+
+
+agx = (sum(gx^2))^0.5 # L2 norm of descent direction at x
+
+iter = 0
+maxiter = 1000
+while(agx > tol & iter < maxiter){
+	#print("a g x "+agx)
+	d = -gx
+#### Backtracking Line search ####
+	k = 0
+	tk = t
+	xnew = x + tk*d
+	fxnew = arima_css(xnew, Z, p, P, q, Q, s)
+	#print("new "+fxnew)
+	foo = fx + alpha*tk*castAsScalar(t(d)%*%d)
+	#print("step size "+ foo)
+	while(fxnew > fx + alpha*tk*castAsScalar(t(d)%*%d)){
+		tk = beta*tk
+		xnew = x + tk*d
+		fxnew = arima_css(xnew, Z, p, P, q, Q, s)
+		k = k+1
+	}
+ 	######print("step size at iter " + iter+" is "+ tk)
+	x = x + tk*d #constant step size
+	fx = arima_css(x, Z, p, P, q, Q, s)
+	print("--------------------------------------------------------------iter "+iter+ " step size  "+ tk+" best so far "+fx)
+	gx = objFDgr(x, Z, p, P, q, Q, s)
+	agx = (sum(gx^2))^0.5
+	iter = iter + 1
+}
+
+print("global best " +fx + " Total number of iter "+iter)	
+write(x, $10, format="text")
+

@@ -1,0 +1,14 @@
+foo1 = function (matrix[double] M) return (matrix[double] ret) {
+  ret = M + 1
+}
+foo2 = function (matrix[double] M) return (matrix[double] ret) {
+  ret = M + 2
+}
+
+M = matrix ("1 2 3 4 5 6", rows=3, cols=2)
+optimizer = $optimizer
+solver= $solver
+A = eval(optimizer, M)
+B = eval(solver, M)
+print ("A = \n" + toString(A))
+print ("B = \n" + toString(B))

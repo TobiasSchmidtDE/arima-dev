@@ -1,0 +1,840 @@
+---
+title: "ARIMA Notebook"
+output: html_notebook
+---
+
+ARIMA CSS:
+```{r}
+
+addDiagonalToMatrix = function (M, diagValue, diagSize){
+    diagonal = diag(nrow = diagSize) * diagValue
+    startRow = NROW(M) - diagSize + 1
+    endRow = NROW(M)
+    startCol = 1
+    endCol = diagSize
+    M[startRow:endRow, startCol:endCol] = M[startRow:endRow, startCol:endCol] + diagonal
+    return (M)
+}
+
+arima_predictdml = function(weights, Z, p, d, q, P, D, Q, s, ncond){
+
+	if (p > 0) phi = weights[1:p]
+    if (q > 0) theta = weights[(p+1):(p+q)]
+	if (P > 0) Phi = weights[(p+q+1):(p+q+P)]
+    if (Q > 0) Theta = weights[(p+q+P+1):(p+q+P+Q)]
+	
+    multiplicativeWeights = matrix(weights)
+	if (p>0 & P>0){
+		multiplicativePhi = matrix(Phi %*% t(phi), nrow=p*P, ncol=1)
+		multiplicativeWeights = rbind(multiplicativeWeights, multiplicativePhi)
+	}
+	
+	if (q>0 & Q>0){
+		multiplicativeTheta = matrix(Theta %*% t(theta), nrow=q*Q, ncol=1)
+		multiplicativeWeights = rbind(multiplicativeWeights, multiplicativeTheta)
+	}
+    #print(multiplicativeWeights)
+    
+	b = Z %*% multiplicativeWeights
+	
+	A = diag(nrow= NROW(Z)) #identity matrix
+	
+	if (q > 0){
+	    for(i in 1:q){
+	        A = addDiagonalToMatrix (A, theta[i], NROW(A)-i)
+	    }
+    }
+
+	if (Q > 0){
+        for(i in 1:Q){
+	        A = addDiagonalToMatrix (A, Theta[i], NROW(A)-(i*s))
+	   }
+    }
+
+	if (q > 0 && Q > 0){
+	     for(i in 1:q){
+	         for(j in 1:Q){
+	            A = addDiagonalToMatrix (A, theta[i]*Theta[j], NROW(A)-(i + j*s))
+	         }
+	    }
+	}
+
+    x_hat = forwardsub_solver (A, b)
+	return (x_hat)
+}
+
+#This function is used to calculate the error that occures when predicting using the given weights
+arima_residualsdml = function(weights, X, Z, p, d, q, P, D, Q, s, ncond){
+    #browser()
+    #transWeights = transformParamsMultiplicative(weights, p, d, q, P, D, Q, s)
+    #return(arima_residuals_c_like(transWeights, X, p, d, q, P, D, Q, s, ncond))
+    
+    approximated_solution = arima_predictdml(weights, Z, p, d, q, P, D, Q, s, ncond)
+    errs = X - approximated_solution
+    if (ncond > 0) errs[1:ncond] = 0
+    return (errs)
+}
+
+
+arima_css = function(weights, X, Z, p, d, q, P, D, Q, s, ncond){
+  errs = arima_residualsdml (weights, X, Z, p, d, q, P, D, Q, s, ncond)
+  
+  errs[!is.finite(errs)] <- 0 # or inf
+  
+  sumofsquares = sum(errs^2)/(NROW(X) - ncond)
+  css = 0.5 * log(sumofsquares)
+  return (css)
+}
+
+arima_residuals_c_like = function(weights, X, p, d, q, P, D, Q, s, ncond){
+    residuals = matrix(0, nrow = NROW(X), ncol = 1);
+
+    phi = weights$phi
+    theta = weights$theta
+    nu = 0
+    ssq= 0
+
+    if (ncond < NROW(X)){
+        for (l in (ncond+1):NROW(X)){
+            tmp = X[l]
+
+            if ((p+P*s) > 0){
+                for (i in 1:(p+P*s)){
+                  tmp = tmp - (phi[i] * X[l - i])
+                }
+            }
+            if ((q+Q*s) > 0){
+                for (j in 1:(q+Q*s)){
+                    if (l - j > 0){
+                        tmp = tmp - (theta[j] * residuals[l - j])
+                    }
+                }
+            }
+            residuals[l] = tmp
+            if (!is.nan(tmp)) {
+                nu  = nu +1;
+                ssq = ssq + tmp * tmp;
+            }
+        }
+    }
+    css = ssq/nu
+    print(css)
+    return (residuals)
+}
+
+
+transformParamsMultiplicative = function (weights, p, d, q, P, D, Q, s){
+    phi = matrix(0, nrow = p+P*s, ncol = 1)
+    theta = matrix(0, nrow = q+Q*s, ncol = 1)
+    
+    if(p > 0) phi[1:p] = weights[1:(p)]
+    if(q > 0) theta[1:q] = weights[(p+1):(p+q)]
+    
+    if (P > 0){
+        for (j in 1:P){
+            phi[(j*s)] = phi[(j*s)] + weights[(p+q+j)]
+            if (p > 0){
+                for (i in 1:p){
+                    weigthsProduct = weights[(p+q+j)] * weights[i]
+                    phi[((j*s)+i)] = phi[((j*s)+i)] - weigthsProduct
+                }
+            }
+        }
+    }
+    
+    if (Q > 0){
+        for (j in 1:Q){
+            theta[(j*s)] = theta[(j*s)] + weights[(p+q+P+j)]
+            if (q > 0){
+                for (i in 1:q){
+                    weigthsProduct = weights[(p+q+P+j)] * weights[p+i]
+                    theta[((j*s)+i)] = theta[((j*s)+i)] + weigthsProduct
+                }
+            }
+        }
+    }
+    
+    return (list("phi" = phi, "theta" = theta))
+}
+
+
+arima_css_c = function (weights, X, p, d, q, P, D, Q, s){
+   model = arima(X, fixed = weights , order = c(p,d,q) ,  seasonal = list(order = c(P,D,Q) , period = s ), include.mean = FALSE, transform.pars = FALSE, method = c("CSS"))
+   return (model$sigma2)
+}
+
+arima_residuals_c = function (weights, X, Z, p, d, q, P, D, Q, s, ncond){
+    model = arima(X, fixed = weights , order = c(p,d,q) ,  seasonal = list(order = c(P,D,Q) , period = s ), include.mean = FALSE, transform.pars = FALSE, method = c("CSS"))
+    return (model$residuals)
+    transformedWeights = transformParamsMultiplicative(weights, p, d, q, P, D, Q, s)
+    residuals = arima_residuals_c_like(transformedWeights, X, p, d, q, P, D, Q, s, ncond)
+    return (residuals)
+}
+
+```
+
+```{r}
+
+
+```
+
+
+Gradient of ARIMA CSS
+```{r}
+#Calculates the gradient of ARIMA_CSS (Condition Sum of Squares of Residuals)
+#not working for q > 0 or Q > 0 -> gradFinitDifference(...) retuns differnt values 
+gradArimaCSS = function(weights, X,  Z, p, d, q, P, D, Q, s, ncond){
+  residuals = arima_residualsdml(weights, X, Z, p, d, q, P, D, Q, s, ncond)
+  
+  #to calculate the gradient of MA we need to built another Matrix like Z, but containing the residuals instead of the time series X
+  b = matrix(0, NROW(residuals), q+Q)
+  if ( q > 0){
+      for (i in 1:q){
+        b = addShiftedMatrix(b, residuals, i, i)
+      }
+  }
+  
+  if (Q > 0){
+      for (i in 1:Q){
+        b = addShiftedMatrix(b, residuals, i * s, q+i)
+      }
+  }
+  
+  res_ar = matrix(0, p, 1) #(t(-Z) %*% residuals) * 2
+  for (m in 1:(p)){
+      for (t in 1:(NROW(X))){
+          res_ar[p] = res_ar[p] + (residuals[t] * - (Z[t,m]))
+      }
+  }
+  res_ma = t(-b) %*% residuals
+  grad = matrix(0, p+P+q+Q, 1)
+  if (p > 0) grad[1:p] = res_ar[1:p]
+  if (P > 0) grad[(p+1):(p+P)] = res_ar[(p+1):(p+P)]
+  if (q > 0) grad[(p+P+1):(p+P+q)] = res_ma[1:q]
+  if (Q > 0) grad[(p+P+q+1):(p+P+q+Q)] = res_ma[(q+1):(q+Q)]
+  return (grad)
+}
+
+
+gradFinitDifference = function(weights, X, Z, p, d, q, P, D, Q, s, ncond){
+	h = 1e-3 #finite diff element	
+	r_weights=NROW(weights)
+	
+	y = matrix(0.0,r_weights,1)
+	
+	for(i in 1:r_weights){
+		enew = matrix(0.0,r_weights,1)
+		enew[i,1] = h
+		p1 = weights + enew
+		p2 = weights - enew
+		f1 = arima_css(p1, X, Z, p, d, q, P, D, Q, s, ncond)
+		f2 = arima_css(p2, X, Z, p, d, q, P, D, Q, s, ncond)
+		fooy = (f1 - f2)/(2*h)
+		y[i,1] = fooy
+	}
+	return (y)
+}
+
+```
+
+```{r}
+
+
+# L2 norm of descent direction at x
+L2norm = function (fx){
+  norm = (sum(fx^2))^0.5 
+  return (norm)
+}
+
+#Bactracking Line Search
+linesearch = function (searchDirection, fx, weights, X, Z, p, d, q, P, D, Q, s, ncond){
+  #TODO: What are the best starting paramters?
+  c = 0.5
+  r = 0.9
+  m = as.numeric(t(searchDirection)%*%searchDirection)
+  
+  #stepsize
+  ak = 1.0
+  new_weights = weights + ak*searchDirection
+  fxnew = arima_css(new_weights, X, Z, p, d, q, P, D, Q, s, ncond)
+      
+  while(fxnew > fx + c*ak*m){ 
+    ak = r*ak
+    new_weights = weights + ak*searchDirection
+    fxnew = arima_css(new_weights, X, Z, p, d, q, P, D, Q, s, ncond)
+  }
+  return (new_weights)
+}
+
+#Quasi Newton Optimizer: Broyden–Fletcher–Goldfarb–Shanno 
+bfgs_optimizer = function (X, Z, max_iterations, p, d, q, P, D, Q, s, ncond){
+  nParam = p+P+q+Q 
+  
+  weights = matrix(0.0, nParam, 1)
+  fx = arima_css(weights, X, Z, p, d, q, P, D, Q, s, ncond)
+  gx = gradFinitDifference(weights, X, Z, p, d, q, P, D, Q, s, ncond)
+  norm_gx = L2norm(gx) 
+  
+  #The approximated inverse hessian 
+  B = diag(1, nParam) 
+  
+  iter = 0
+  tol = 1.5 * 10^(-16)
+  diff = tol +1
+  while(norm_gx > tol & iter < max_iterations & diff > tol){
+    if (iter == 51){
+       #browser()
+    }
+    print("best weights:")
+    print(weights)
+    print("bfgs iteration:")
+    print(iter)
+    print("improvement:")
+    print(diff)
+    
+    #1. + 2. step
+    new_weights = linesearch ((-B%*%gx), fx, weights, X, Z, p, d, q, P, D, Q, s, ncond)
+    
+    fxnew = arima_css(new_weights, X, Z, p, d, q, P, D, Q, s, ncond)
+    gxnew = gradFinitDifference(new_weights, X, Z, p, d, q, P, D, Q, s, ncond)
+    
+    #3. step
+    ss = new_weights - weights # = stepsize * searchDirection
+    weights = new_weights
+    
+    #4. step
+    yk = gxnew - gx
+    if (yk == 0) break; # prevent from dividing by zero in the next line
+    
+    #5. step
+    # inverse B for next step
+    FT = as.numeric(t(ss)%*%yk + t(yk)%*%B%*%yk)*ss%*%t(ss)/as.numeric(t(ss)%*%yk)^2
+    ST = (B%*%(yk%*%t(ss)) + (ss%*%t(yk))%*%B)/as.numeric(t(ss)%*%yk)
+    
+    B = B + FT - ST
+    
+    diff = abs(fx - fxnew)
+    fx = fxnew
+    gx = gxnew
+    norm_gx = L2norm(gx)
+    iter = iter +1
+  }
+  print("BFGS finished with iterations:")
+  print(iter)
+  return (weights)
+}
+
+```
+
+```{r}
+#inserts the first column of source matrix into the n-th column of target matrix with the specified row offset 
+addShiftedMatrix = function (targetMatrix,  sourceMatrix, rowOffset, nthColumn){
+    targetMatrix[(rowOffset+1):NROW(targetMatrix), nthColumn] = sourceMatrix[1:(NROW(targetMatrix)-rowOffset)]	
+	return (targetMatrix)
+}
+
+
+addValuesForCombinedModel = function (targetMatrix,sourceMatrix, nonSeasonalParam, seasonalParam, seasonality, columnOffset){
+    
+	counter = 1
+	if (nonSeasonalParam > 0 && seasonalParam > 0){
+    	for	(k in 1:nonSeasonalParam){
+    		for(j in 1:seasonalParam){
+    			targetMatrix = addShiftedMatrix(targetMatrix, sourceMatrix, k + (j*seasonality), columnOffset + counter)
+    			counter = counter+1
+    		}
+    	}
+	}
+	return (targetMatrix)
+}
+
+#Construts Matrix Z with all values that can be used to calculate an approximation of the timeseries in X. 
+#Each row in Z is used to predict the value in the corresponding row of X
+#Columns of Z represent values used for predicting either AR, SAR, MA or SMA
+#p+P cols for ar & sar 
+#q+Q cols for ma & sma 
+#p*P cols for multiplicative SAR 
+#q*Q cols for multiplicative SMA 
+constructPredictorMatrix = function (X, p, d, q, P, D, Q, s, ncond){
+    Z = matrix(0, NROW(X), p + P + Q + q + p*P + q*Q)
+    
+    # fills Z with values used for non seasonal AR prediction
+    if (p > 0){
+      for(i in 1:p){
+        Z = addShiftedMatrix(Z, X, i, i)
+      }
+    }
+   
+    #prediction values for non seasonal MA 
+    if (q > 0){
+      for(i in 1:q){
+        Z = addShiftedMatrix(Z, X, i, p + i)
+      }
+    }
+    
+    #prediction values for seasonal AR 
+    if (P > 0){
+      for(i in 1:P){
+        Z = addShiftedMatrix(Z, X, (i * s), p + q + i)
+      }
+    }
+    
+    #prediction values for seasonal MA 
+    if (Q > 0){
+      for(i in 1:Q){
+        Z = addShiftedMatrix(Z, X, (i * s), p + q + P + i)
+      }  
+    }
+  
+  
+    #prediction values for combined models of non-seasonal and seasonal AR
+    #for multiplicative AR the sign has to be inverted
+    Z = addValuesForCombinedModel (Z, (-1) * X, p, P, s, p + P + q + Q)
+    
+    #prediction values for combined models of non-seasonal and seasonal MA
+    Z = addValuesForCombinedModel (Z, X, q, Q, s, p + P + q + Q + p*P)
+    
+    if (ncond > 0){
+	   Z[1:ncond,] = 0
+	   if (q > 0){
+	       for (i in 1:q){
+	            Z[1:(ncond+i),(p+i)] = 0
+	       }
+	   }
+	   if (Q > 0){
+	       for (i in 1:Q){
+	            Z[1:(ncond+(i*s)),(p+q+P+i)] = 0
+	       }
+	   }
+	   if (q > 0 && Q > 0){
+           count = 1
+           for(i in 1:q){
+	          for(j in 1:Q){
+	             Z[1:(ncond+(i+j*s)),(p+q+P+Q+P*p+count)] = 0
+	             count = count + 1;
+	          }
+	       }
+	    }
+	}
+    
+    return (Z)
+}
+
+difference = function (X, d, D, s) {
+	# d-th order non seasonal differencing:
+	if (d > 0){
+        for(i in 1:d){
+    	    X[2:NROW(X)] = X[2:NROW(X)] - X[1:(NROW(X)-1)] 
+    	}
+    }
+	# D-th order seasonal differencing:
+	if (D > 0){
+        for(i in 1:D){
+    	    X[(s+1):NROW(X)] = X[(s+1):NROW(X)] - X[1:(NROW(X)-s)] 
+        }
+	}
+	
+    return (X)
+}
+```
+
+```{r}
+custom_arima = function (X, max_iterations, p, d, q, P, D, Q, s){
+    diffX = difference(X, d, D, s)
+    Z = constructPredictorMatrix(diffX, p, d, q, P, D, Q, s) 
+   
+    ncond = d + D*s + p + P*s
+    return (bfgs_optimizer (diffX, Z, max_iterations, p, d, q, P, D, Q, s, ncond))
+}
+
+mixedArima <- function (X, max_iterations, p, d, q, P, D, Q, s){
+    diffX = difference(X, d, D, s)
+    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s)
+    
+    ncond = d + D*s + p + P*s
+    armaCSS <- function(weights)
+        {
+             
+            res <- arima_css(weights, diffX, Z, p, d, q, P, D, Q, s, ncond)
+            #print (res)
+    }
+    
+    armaCSSGradient<- function(weights)
+        {
+             
+            res <- gradFinitDifference(weights, diffX, Z, p, d, q, P, D, Q, s, ncond)
+            #print (res)
+    }
+    
+    init = rep.int(0, p+q+P+Q)
+    res <- optim(
+        init,
+        armaCSS,
+        gr = armaCSSGradient,
+        method = "BFGS",
+        hessian = FALSE,
+        control = list(maxit = max_iterations, trace = 6)
+    )
+}
+
+```
+
+
+Utils:
+```{r}
+
+absolutDiff= function (numA, numB){
+    return (abs(numA - numB))
+}
+
+relativeDiff= function (numA, numB){
+    return (if (numA == 0) 0 else absolutDiff(numA, numB) / numA)
+}
+
+allAbsolutDiffs = function (As, Bs){
+    allDiffs = c()
+    for (i in 1:length(As)){
+        allDiffs[i]= absolutDiff (As[i], Bs[i])
+    }
+    return (matrix(allDiffs))
+}
+
+allRelativeDiffs = function (As, Bs){
+    allDiffs = c()
+    for (i in 1:length(As)){
+        allDiffs[i]= relativeDiff (As[i], Bs[i])
+    }
+    return (matrix(allDiffs))
+}
+
+nearlyEqual = function (numA, numB, tolerance){
+    return (absolutDiff(numA, numB) <= tolerance)
+}
+
+allNearlyEqual = function (As, Bs, tolerance){
+    for (i in 1:length(As)){
+        if (!nearlyEqual(As[i], Bs[i], tolerance)){
+           return (FALSE)
+        }
+    }
+    return (TRUE)
+}
+```
+
+```{r}
+arimamodels = function (X, max_iterations, p, d, q, P, D, Q, s){
+    browser()
+    custom_arimamodel = custom_arima (X, max_iterations, p, d, q, P, D, Q, s)
+    
+    nonseasonalOrder = c(p,d,q)
+    seasonalOrder = list(order = c(P,D,Q) , period = s )
+    
+    builtin_arimamodel = arima(X , order = nonseasonalOrder,  seasonal = seasonalOrder, include.mean = FALSE, transform.pars = FALSE, method = c("CSS"), optim.method = "BFGS", optim.control = list(maxit = max_iterations))
+    
+    mixed_arimamodel = mixedArima (X, max_iterations, p, d, q, P, D, Q, s)
+    #custom_arimamodel = mixed_arimamodel$par
+    return (list ("custom" = custom_arimamodel, "builtin" = builtin_arimamodel, "mixed" = mixed_arimamodel))
+}
+
+bultinarimamodels = function (X, max_iterations, p, d, q, P, D, Q, s){
+    nonseasonalOrder = c(p,d,q)
+    seasonalOrder = list(order = c(P,D,Q) , period = s )
+    
+    print("Nelder-Mead")
+    neldermead_arimamodel = arima(X , order = nonseasonalOrder,  seasonal = seasonalOrder, include.mean = FALSE, transform.pars = FALSE, method = c("CSS"), optim.method = "Nelder-Mead")
+    
+    print("BFGS")
+    bfgs_arimamodel = arima(X , order = nonseasonalOrder,  seasonal = seasonalOrder, include.mean = FALSE, transform.pars = FALSE, method = c("CSS"), optim.method = "BFGS")
+    
+    print("CG")
+    CG_arimamodel = arima(X , order = nonseasonalOrder,  seasonal = seasonalOrder, include.mean = FALSE, transform.pars = FALSE, method = c("CSS"), optim.method = "CG")
+    
+    return (list ("cg" = CG_arimamodel, "bfgs" = bfgs_arimamodel, "neldermead" = neldermead_arimamodel))
+}
+
+arimaResiduals = function (X, weights, p, d, q, P, D, Q, s){
+   
+    browser()
+    #custom_residuals = arima_residuals(transformParamsMultiplicative( weights,  p, d, q, P, D, Q, s), X, X, p, d, q, P, D, Q, s, p+P*s)
+    #print(weights)
+    #print(transformParamsMultiplicative(weights, p, d, q, P, D, Q, s))
+    
+    ncond = d + D*s + p + P*s
+    diffX = difference(X, d, D, s)
+    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s)
+    custom_residuals = arima_residualsdml(weights, diffX, Z, p, d, q, P, D, Q, s, ncond)
+    builtin_residuals = arima_residuals_c(weights, X, Z, p, d, q, P, D, Q, s, ncond)
+    
+    return (list ("custom" = custom_residuals, "builtin" = builtin_residuals))
+}
+
+arima_predict_css = function (X, weights, p, d, q, P, D, Q, s){
+    browser()
+    diffX = difference(X, d, D, s)
+    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s)
+    ncond = d + D*s + p + P*s
+    
+    #css_r = arima_css(weights, X, Z, p, d, q, P, D, Q, s)
+    css_r = arima_css(weights, diffX, Z, p, d, q, P, D, Q, s, ncond)
+    css_c = arima_css_c(weights, X, p, d, q, P, D, Q, s)
+    
+    return (list ("custom" = css_r, "builtin" = css_c))
+}
+
+arimaGrad = function (X, weights, p, d, q, P, D, Q, s){
+    browser()
+    Z = constructPredictorMatrix (X, p, d, q, P, D, Q, s)
+    
+    ncond = d + D*s + p + P*s
+    arima_css_wrapper = function (w) {
+        return (arima_css( w, X, Z, p, d, q, P, D, Q, s, ncond))
+    }
+    finiteDiffGradient = gradFinitDifference(weights, X, Z, p, d, q, P, D, Q, s, ncond)
+    directGradient = pracma::fderiv(Vectorize(arima_css_wrapper), weights) #gradArimaCSS (weights, X, Z, p, d, q, P, D, Q, s)
+    
+    return (list ("finite" = finiteDiffGradient, "direct" = directGradient))
+}
+
+compareArima = function (model1, model2){
+    diffs = allAbsolutDiffs(model1, model2);
+    return (list ("all" = diffs, "max" = max(diffs), "min" = min (diffs), "mean" = mean(diffs), "sum" = sum(abs(diffs))));
+}
+
+compareArimaRelative = function (model1, model2){
+    diffs = allRelativeDiffs(model1, model2);
+    return (list ("all" = diffs, "max" = max(diffs), "min" = min (diffs), "mean" = mean(diffs), "sum" = sum(abs(diffs))));
+}
+```
+
+```{r}
+#setwd("~/Desktop/DHBW/Studienarbeit/data/multiple_household_power_consumption/Individual_Households")
+```
+
+
+
+
+```{r}
+library(forecast)
+library(zoo)
+model <- Arima(y= c(0,0,0,0) , order=c(1,0,0), seasonal=list(order = c(0, 0, 0) , period = 3 ),
+             fixed=c(0.8, -0.4))
+
+folder_Individual_Households = "~/Desktop/DHBW/Studienarbeit/data/multiple_household_power_consumption/Individual_Households/"
+resamplePrefix = "MT_225-Resampled"
+resampleSuffix = "-householddata.csv"
+rawData = file(paste(folder_Individual_Households,"MT_225-ElectricityLoadDiagramm2011_2014-master.csv", sep = ""))
+hourlyData = file(paste(folder_Individual_Households, resamplePrefix, "H", resampleSuffix, sep=""))
+sixhourlyData = file(paste(folder_Individual_Households, resamplePrefix, "6H", resampleSuffix, sep=""))
+twelvehourlyData = file(paste(folder_Individual_Households, resamplePrefix, "12H", resampleSuffix, sep=""))
+dailyData = file(paste(folder_Individual_Households, resamplePrefix, "D", resampleSuffix, sep=""))
+weeklyData = file(paste(folder_Individual_Households, resamplePrefix, "W", resampleSuffix, sep=""))
+monthlyData = file(paste(folder_Individual_Households, resamplePrefix, "M", resampleSuffix, sep=""))
+
+X <- read.zoo(weeklyData, header = FALSE, sep = ";", index.column = list(1))
+X <- ts(X)
+firstDiff = difference(X, 1, 0, 0)
+seasonalfirstDiff = difference(X, 1,1, 52)
+plot (X)
+plot (firstDiff)
+plot (seasonalfirstDiff)
+X_pacf = pacf(seasonalfirstDiff)
+X_acf = acf(seasonalfirstDiff, lag.max = 1500)
+```
+
+
+
+RUN ARMA
+```{r}
+arima_models = arimamodels(X, 2, 3, 0, 3, 0, 0, 0, 2)
+
+builtin_coef =arima_models$builtin$coef
+mixed_coef = arima_models$mixed$par
+custom_coef = arima_models$custom
+
+comparisonCustomToBuiltin = compareArima(builtin_coef, custom_coef)
+comparisonCustomToMixed = compareArima(custom_coef, mixed_coef)
+comparisonMixedToBuiltin = compareArima(builtin_coef, mixed_coef)
+
+
+
+print (cbind (builtin_coef, mixed_coef, custom_coef))
+print (cbind(comparisonMixedToBuiltin, comparisonCustomToMixed, comparisonCustomToBuiltin))
+
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+bultin_arimamodels = bultinarimamodels(X, 1000, 3, 0, 6, 0, 0, 0, 3)
+
+print("Models")
+bfgs_coef = bultin_arimamodels$bfgs$coef
+cgradient_coef = bultin_arimamodels$cg$coef
+neldermead_coef = bultin_arimamodels$neldermead$coef
+print (cbind(bfgs_coef, cgradient_coef, neldermead_coef))
+
+
+print("Comparison")
+comparisonBFGS_NelderMead = compareArima(bultin_arimamodels$bfgs$coef, bultin_arimamodels$neldermead$coef)
+comparisonCG_NelderMead = compareArima(bultin_arimamodels$cg$coef, bultin_arimamodels$neldermead$coef)
+comparisonCG_BFGS = compareArima(bultin_arimamodels$cg$coef, bultin_arimamodels$bfgs$coef)
+
+print (cbind(comparisonBFGS_NelderMead, comparisonCG_NelderMead, comparisonCG_BFGS))
+
+```
+
+```{r}
+plotArima(X, 1, 0, 0, 0, 10)
+```
+```{r}
+plotArima(X, 1, 0, 0, 0, 10)
+```
+
+
+```{r}
+
+
+testweights = c(0.2, 0.1, 0.54, 0.2, 0.1, 0.54, 0.02, 0.02)
+css = arima_predict_css (X, testweights, 2, 2, 2, 2, 3)
+comparison = compareArima(css$custom, css$builtin)
+print (cbind( matrix(css$builtin), matrix(css$custom), matrix(comparison$all)))
+print (comparison$max)
+
+```
+
+```{r}
+jacobi_solver = function (A, b, tolerance=1e-16, max_iterations=1000){
+    x = matrix(0, nrow(A), 1)
+  	iter = 0
+	diff = tolerance+1
+	diag_A = diag(A)
+	rest_A = A - diag(diag_A,nrow(A),nrow(A)) 
+	
+	
+	while(iter < max_iterations & diff > tolerance){
+		x_new =1/diag_A * (b - rest_A %*% x)
+		diff =sum(abs(x_new-x))
+		x = x_new
+		iter = iter + 1
+	}
+	#print("jacobi finised after iteration")
+	#print(iter)
+	return (x)
+}
+
+forwardsub_solver = function (A, b){
+    x = matrix(0, nrow(A), 1)
+    for (i in 1:nrow(A)){
+        x[i,1] = (b[i,1] - A[i,] %*% x[,1]) / A[i,i]
+    }
+    return (x)
+}
+
+random_A = rbind(c(10, -1, 2, 0), c(-1, 11, -1, 3), c(2,-1,10,-1), c(0, 3, -1, 8))
+random_x = matrix(c(1, 2, -1, 1))
+test_b = random_A %*% random_x
+calc_x = jacobi_solver(random_A, test_b)
+print(cbind(calc_x, random_x, calc_x-random_x))
+```
+
+
+
+```{r}
+ 
+testweights = c(8.565512,
+                8.549562,
+                8.613250,
+                12.626212,
+                7.071511,
+                3.130054)
+
+#testweights = rep.int(1, 10)
+residuals = arimaResiduals (X, testweights,  3, 0, 3, 0, 0, 0, 2)
+css = arima_predict_css(X, testweights, 3, 0, 3, 0, 0, 0, 2)
+
+comparison_res = compareArima(residuals$custom, residuals$builtin)
+relativecomparison_res = compareArimaRelative(residuals$custom, residuals$builtin)
+
+comparison_css = compareArima(css$custom, css$builtin)
+relativecomparison_css = compareArimaRelative(css$custom, css$builtin)
+
+print (cbind(comparison_res$all, relativecomparison_res$all, residuals$custom, residuals$builtin))
+print(css)
+print (cbind(comparison_res))
+print (cbind(relativecomparison_res))
+print (cbind(comparison_css))
+print (cbind(relativecomparison_css))
+```
+
+
+```{r}
+
+#testweights = c(0.2, 0.1, 0.54, 0.2, 0.1, 0.54, 0.02, 0.02)
+X = c(1, -2, 3, 2, 1, -2, 3, 2)
+testweights = rep.int(2, 4)
+grad = arimaGrad (X, testweights, 4, 0, 0, 0, 3)
+comparisongrad = compareArima(grad$finite, grad$direct)
+
+print (cbind(grad$finite, grad$direct))
+
+print (comparisongrad)
+```
+
+```{r}
+init = rep.int(0, 2)
+res <- optim(
+    init,
+    hydroPSO::rosenbrock,
+    method = "BFGS",
+    hessian = FALSE,
+    control = list(abstol = 1e-32, reltol = 1e-32, maxit = 1000000)
+)
+res
+```
+```{r}
+rosenbrocks = function (x, y){
+    res = matrix(0, NROW(x), NROW(y))
+    for (i in 1:NROW(x)){
+        for (j in 1:NROW(y)){
+            res[i,j] = hydroPSO::rosenbrock(c(x[i],y[j]))
+        }
+    }
+    return (res)
+}
+x <- seq(-2,2,length.out=50)
+y <- seq(-2, 2,length.out=50)
+z <- rosenbrocks(x,y)
+
+require(lattice)
+wireframe(z, col.regions=rainbow(100))
+persp(x, y, z, theta = 140, phi = 20, expand = 0.5)
+
+```
+
+```{r}
+testarima = function (init, test_size, weights, p, d, q, P, D, Q, s){
+    browser()
+    x = init
+    for (i in 1:test_size){
+        Z = constructPredictorMatrix(c(x, 0), p, d, q, P, D, Q, s)
+        x_hat = arima_predictdml(weights, Z, p, d, q, P, D, Q, s, p+P*s)
+        x = c(x, x_hat[NROW(x_hat)])
+    }
+    return (x_hat)
+}
+
+testweights = c(0.318, -0.6255)
+test_x = testarima(c(0.4, 0.2), 100, testweights, 1, 1, 0, 0, 3)
+test_weights = custom_arima(test_x, 1000, 2, 0, 0, 0, 0, 0, 3)
+```
+
+```{r}
+
+```
+
+

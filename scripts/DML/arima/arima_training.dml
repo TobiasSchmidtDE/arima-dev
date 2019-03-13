@@ -7,9 +7,9 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-# 
+#
 #   http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -19,7 +19,7 @@
 #
 #-------------------------------------------------------------
 # Arguments
-# 'X': X (one column time series - there has to be an .mtd file associated to the src file!) 
+# 'X': X (one column time series - there has to be an .mtd file associated to the src file!)
 # 'max_func_invoc': max_func_invoc (default 1000)
 # 'p': p (non-seasonal AR order) (default 0)
 # 'd': d (non-seasonal differencing order) (default 0)
@@ -32,7 +32,7 @@
 # 'solver': must be either 'cg' for conjugate gradients method or 'jacobi' for jacobi method (default "jacobi")
 # 'optim_method': must be either "neldermead" or "bfgs" (default "bfgs")
 # 'dest': file name to store learnt parameters (default "arima-result.csv")
-# 'result_format': the format of the destination file (default "csv") 
+# 'result_format': the format of the destination file (default "csv")
 
 source("arima_prediction.dml") as arima_prediction
 
@@ -63,30 +63,30 @@ neldermead_optimizer = function (Matrix[Double] X, Matrix[Double] Z, Integer max
 	tol = 1.5 * 10^(-8) * as.scalar(objvals[1,1])
 
 	num_func_invoc = ncol(simplex)
-	
+
 	continue = TRUE
 	while(continue & num_func_invoc <= max_iterations){
 		best_index = as.scalar(rowIndexMin(objvals))
 		worst_index = as.scalar(rowIndexMax(objvals))
-		
+
 		best_obj_val = as.scalar(objvals[1,best_index])
 		worst_obj_val = as.scalar(objvals[1,worst_index])
-		
+
 		continue = (worst_obj_val > best_obj_val + tol)
 
 		debug("#Function calls::" + num_func_invoc + " OBJ: " + best_obj_val)
-		
+
 		c = (rowSums(simplex) - simplex[,worst_index])/(nrow(simplex))
-		
+
 		x_r = 2*c - simplex[,worst_index]
 		obj_x_r = arima_css(x_r, X, Z, p, P, q, Q, s, solver)
 		num_func_invoc += 1
-		
+
 		if(obj_x_r < best_obj_val){
 			x_e = 2*x_r - c
 			obj_x_e = arima_css(x_e, X, Z, p, P, q, Q, s, solver)
 			num_func_invoc = num_func_invoc + 1
-			
+
 			simplex[,worst_index] = ifelse (obj_x_r <= obj_x_e, x_r, x_e)
 			objvals[1,worst_index] = ifelse (obj_x_r <= obj_x_e, obj_x_r, obj_x_e)
 		}else{
@@ -94,11 +94,11 @@ neldermead_optimizer = function (Matrix[Double] X, Matrix[Double] Z, Integer max
 				simplex[,worst_index] = x_r
 				objvals[1,worst_index] = obj_x_r
 			}
-			
+
 			x_c_in = (simplex[,worst_index] + c)/2
 			obj_x_c_in = arima_css(x_c_in, X, Z, p, P, q, Q, s, solver)
 			num_func_invoc += 1
-			
+
 			if(obj_x_c_in < as.scalar(objvals[1,worst_index])){
 				simplex[,worst_index] = x_c_in
 				objvals[1,worst_index] = obj_x_c_in
@@ -116,35 +116,35 @@ neldermead_optimizer = function (Matrix[Double] X, Matrix[Double] Z, Integer max
 			}
 		}
 	}
-	
+
 	debug("final simplex:\n" + toString(simplex) + "\n with best index at " + best_index)
 	arima_model = simplex[,best_index]
 }
- 
+
 #Calculates the gradient of ARIMA_CSS (Condition Sum of Squares of Residuals)
-#not working for q > 0 or Q > 0 -> gradFinitDifference(...) retuns differnt values 
+#not working for q > 0 or Q > 0 -> gradFinitDifference(...) retuns differnt values
 gradArimaCSS = function(Matrix[Double] weights, Matrix[Double] X, Matrix[Double] Z, Integer p, Integer P, Integer q, Integer Q, Integer s, String solver) return(Matrix[double] grad){
 	[residuals, combined_weights] = arima_residuals(weights, X, Z, p, P, q, Q, s, solver)
-	
+
 	#to calculate the gradient of MA we need to built another Matrix like Z, but containing the residuals instead of the time series X
 	b = matrix(0, nrow(residuals), q+Q)
 	for (i in seq(1,q,1)){
 		b = addShiftedMatrix(b, residuals, i, i)
 	}
-	
+
 	for (i in seq(1,Q,1)){
 		b = addShiftedMatrix(b, residuals, i * s, q+i)
 	}
-	
+
 	res_ma = t(-b) %*% residuals
 	res_ar = t(-Z) %*% residuals
-		
+
 	grad = matrix(0, rows=p+P+q+Q, cols=1)
 	if (p > 0) grad[1:p,] = res_ar[1:p,]
 	if (P > 0) grad[p+1:p+P,] = res_ar[p+1:p+P,]
 	if (q > 0) grad[p+P+1:p+P+q] = res_ma[1:q,]
 	if (Q > 0) grad[p+P+q+1:p+P+q+Q] = res_ma[q+1:q+Q,]
-	if (p>0 & P>0){		
+	if (p>0 & P>0){
 		for(i in seq(1, p, 1)){
 			permut = matrix(0, rows=p, cols=P)
 			permut[i,] = t(combined_weights[p+1:p+P,])
@@ -156,13 +156,13 @@ gradArimaCSS = function(Matrix[Double] weights, Matrix[Double] X, Matrix[Double]
 			permut[,i] = combined_weights[1:p,]
 			grad[p+i,1] = grad[p+i,1] + sum(res_ar[p+P+1:p+P+p*P,] * matrix(permut, rows=p*P, cols=1))
 		}
-		
+
 	}
 }
 
 # L2 norm of descent direction at x
 L2norm = function (Matrix[Double] fx)return(Double norm){
-	norm = (sum(fx^2))^0.5 
+	norm = (sum(fx^2))^0.5
 }
 
 #Bactracking Line Search
@@ -170,64 +170,64 @@ linesearch = function (Matrix[Double] searchDirection, Double fx,  Matrix[Double
 	#TODO: What are the best starting paramters?
 	alpha = 0.0001
 	r = 0.9
-	
+
 	#stepsize
 	ak = 1.0
-	
+
 	new_weights = weights + ak*searchDirection
-	fxnew = arima_css(new_weights, X, Z, p, P, q, Q, s, solver)	
-	
-	while(fxnew > fx + alpha*ak*as.scalar(t(searchDirection)%*%searchDirection)){ 
+	fxnew = arima_css(new_weights, X, Z, p, P, q, Q, s, solver)
+
+	while(fxnew > fx + alpha*ak*as.scalar(t(searchDirection)%*%searchDirection)){
 		ak = r*ak
 		new_weights = weights + ak*searchDirection
 		fxnew = arima_css(new_weights, X, Z, p, P, q, Q, s, solver)
 	}
 }
 
-#Quasi Newton Optimizer: Broyden–Fletcher–Goldfarb–Shanno 
+#Quasi Newton Optimizer: Broyden–Fletcher–Goldfarb–Shanno
 bfgs_optimizer = function (Matrix[Double] X, Matrix[Double] Z, Integer max_iterations, Integer p, Integer P, Integer q, Integer Q, Integer s, String solver)return(Matrix[Double] weights){
 	nParam = p+P+q+Q
-	
+
 	#'first guess' weights should not be intitialized with 0, otherwise the norm of gx will equal 0 and the loop will not run
 	weights = matrix(0.5, nParam, 1)
 	fx = arima_css(weights, X, Z, p, P, q, Q, s, solver)
 	gx = gradArimaCSS(weights, X, Z, p, P, q, Q, s, solver)
 	norm_gx = L2norm(gx)
-	
-	#The approximated inverse hessian 
-	B = diag(matrix(1.0, nParam,1)) 
-	
+
+	#The approximated inverse hessian
+	B = diag(matrix(1.0, nParam,1))
+
 	debug("bfgs_optimizer sum gx^2 " + sum(gx ^2))
 	debug("bfgs_optimizer arima_css initial " + fx)
-	
+
 	iter = 0
 	tol = 1.5 * 10^(-8)
 	diff = tol +1
 	while(norm_gx > tol & iter < max_iterations & diff > tol){
 		debug("bfgs_optimizer iterations " + iter)
-		
+
 		#1. + 2. step
 		[new_weights, fxnew, stepsize] = linesearch ((-B%*%gx), fx, weights, X, Z, p, P, q, Q, s, solver)
 		gxnew = gradArimaCSS(new_weights, X, Z, p, P, q, Q, s, solver)
-		
+
 		#3. step
 		ss = new_weights - weights # = stepsize * searchDirection
 		weights = new_weights
-		
+
 		#4. step
 		yk = gxnew - gx
-		
+
 		#5. step
 		# inverse B for next step
 		FT = as.scalar(t(ss)%*%yk + t(yk)%*%B%*%yk)*ss%*%t(ss)/as.scalar(t(ss)%*%yk)^2
 		ST = (B%*%(yk%*%t(ss)) + (ss%*%t(yk))%*%B)/as.scalar(t(ss)%*%yk)
-				
+
 		B = B + FT - ST
-		
+
 		diff = abs(fx - fxnew)
 		debug("diff is " + diff)
 		debug("arima css = " + fxnew + " with weights:\n" +toString(new_weights, decimal=17))
-		
+
 		fx = fxnew
 		gx = gxnew
 		norm_gx = L2norm(gx)
@@ -236,9 +236,9 @@ bfgs_optimizer = function (Matrix[Double] X, Matrix[Double] Z, Integer max_itera
 	debug("global best " + fx)
 }
 
-#inserts the first column of source matrix into the n-th column of target matrix with the specified row offset 
+#inserts the first column of source matrix into the n-th column of target matrix with the specified row offset
 addShiftedMatrix = function (Matrix[Double] targetMatrix, Matrix[Double] sourceMatrix, Integer rowOffset, Integer nthColumn) return (Matrix[Double] targetMatrix){
-	targetMatrix[rowOffset+1:nrow(targetMatrix), nthColumn] = sourceMatrix[1:nrow(targetMatrix)-rowOffset, 1]	
+	targetMatrix[rowOffset+1:nrow(targetMatrix), nthColumn] = sourceMatrix[1:nrow(targetMatrix)-rowOffset, 1]
 }
 
 
@@ -269,11 +269,11 @@ difference = function (Matrix[Double] X, Integer d, Integer D, Integer s) return
 	}
 }
 
-#Construts Matrix Z with all values that can be used to calculate an approximation of the timeseries in X. 
+#Construts Matrix Z with all values that can be used to calculate an approximation of the timeseries in X.
 #Each row in Z is used to predict the same value in the corresponding row of X
 #Columns of Z represent values used for predicting either AR, SAR, MA or SMA
-#p+P cols for ar & sar 
-#q+Q cols for ma & sma 
+#p+P cols for ar & sar
+#q+Q cols for ma & sma
 #p*P cols as tmp parameter when combining season and non seasonal AR
 constructPredictorMatrix = function (Matrix[Double] X, Integer p, Integer P, Integer q, Integer Q, Integer s)return( Matrix[Double] Z){
 	Z = matrix(0, nrow(X), p+P+Q+q+p*P+q*Q)
@@ -283,7 +283,7 @@ constructPredictorMatrix = function (Matrix[Double] X, Integer p, Integer P, Int
 		Z = addShiftedMatrix(Z, X, i, i)
 	}
 
-	#prediction values for seasonal AR 
+	#prediction values for seasonal AR
 	for(i in seq(1, P, 1)){
 		Z = addShiftedMatrix(Z, X, (i * s), p + i)
 	}
@@ -291,12 +291,12 @@ constructPredictorMatrix = function (Matrix[Double] X, Integer p, Integer P, Int
 	#prediction values for combined models of non-seasonal and seasonal AR
 	Z = addValuesForCombinedModel (Z, X, p, P, s, p + P)
 
-	#prediction values for non seasonal MA 
+	#prediction values for non seasonal MA
 	for(i in seq(1, q, 1)){
 		Z = addShiftedMatrix(Z, X, i, p + P + p*P + i)
 	}
 
-	#prediction values for seasonal MA 
+	#prediction values for seasonal MA
 	for(i in seq(1,Q, 1)){
 		Z = addShiftedMatrix(Z, X, (i * s), p + P + p*P + q + i)
 	}
@@ -307,7 +307,7 @@ constructPredictorMatrix = function (Matrix[Double] X, Integer p, Integer P, Int
 
 #input col of time series data
 X = read($X)
-solver = ifdef($solver, "jacobi")	
+solver = ifdef($solver, "jacobi")
 optim_method = ifdef($optim_method, "bfgs")
 max_func_invoc = ifdef($max_func_invoc, 1000)
 dest = ifdef($dest, "arima-results.csv")
@@ -324,8 +324,8 @@ D = ifdef($D, 0)
 Q = ifdef($Q, 0)
 
 #length of the season
-s = ifdef($s, 1)	
-	
+s = ifdef($s, 1)
+
 debug ("p= " + p)
 debug ("d= " + d)
 debug ("q= " + q)
@@ -363,7 +363,6 @@ max_ar_lag = max(p, P*s, p+(P*s))
 
 arima_model = eval(optim_method + "_optimizer", X[max_ar_lag+1:nrow(X)], Z[max_ar_lag+1:nrow(Z)], max_func_invoc, p, P, q, Q, s, solver)
 
-
 #TODO: Add RMSE to output
 
 colNames = as.frame("")
@@ -381,7 +380,6 @@ for (i in seq(1, Q, 1)){
 }
 print("Coefficients for SARIMA("+p+", "+d+", "+q+")("+P+", "+D+", "+Q+") with seasonality s="+s+":\n" + toString(cbind(colNames[2:p+P+q+Q+1, ], as.frame(arima_model)), decimal=15))
 write(arima_model, dest, format=result_format)
-
 
 
 debug = function (String msg){

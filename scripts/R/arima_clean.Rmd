@@ -1,0 +1,481 @@
+
+
+ARIMA CSS:
+
+```{r}
+arima_predict = function(weights, Z, p, d, q, P, D, Q, s, ncond){
+
+	if (p > 0) phi = weights[1:p]
+    if (q > 0) theta = weights[(p+1):(p+q)]
+	if (P > 0) Phi = weights[(p+q+1):(p+q+P)]
+    if (Q > 0) Theta = weights[(p+q+P+1):(p+q+P+Q)]
+	
+    multiplicativeWeights = matrix(weights)
+	if (p>0 & P>0){
+		multiplicativePhi = matrix(Phi %*% t(phi), nrow=p*P, ncol=1)
+		multiplicativeWeights = rbind(multiplicativeWeights, multiplicativePhi)
+	}
+	
+	if (q>0 & Q>0){
+		multiplicativeTheta = matrix(Theta %*% t(theta), nrow=q*Q, ncol=1)
+		multiplicativeWeights = rbind(multiplicativeWeights, multiplicativeTheta)
+	}
+    
+	b = Z %*% multiplicativeWeights
+	
+	A = diag(nrow= NROW(Z)) #identity matrix
+	
+	if (q > 0){
+	    for(i in 1:q){
+	        A = addDiagonalToMatrix (A, theta[i], NROW(A)-i)
+	    }
+    }
+
+	if (Q > 0){
+        for(i in 1:Q){
+	        A = addDiagonalToMatrix (A, Theta[i], NROW(A)-(i*s))
+	   }
+    }
+
+	if (q > 0 && Q > 0){
+	     for(i in 1:q){
+	         for(j in 1:Q){
+	            A = addDiagonalToMatrix (A, theta[i]*Theta[j], NROW(A)-(i + j*s))
+	         }
+	    }
+	}
+
+    x_hat = forwardsub_solver (A, b)
+	return (x_hat)
+}
+
+#This function is used to calculate the error that occures when predicting using the given weights
+arima_residualsdml = function(weights, X, Z, p, d, q, P, D, Q, s, ncond){
+    approximated_solution = arima_predict(weights, Z, p, d, q, P, D, Q, s, ncond)
+    errs = X - approximated_solution
+    if (ncond > 0) errs[1:ncond] = 0
+    return (errs)
+}
+
+arima_ssq = function(weights, X, Z, p, d, q, P, D, Q, s, ncond){ # sum of squares
+  errs = arima_residualsdml (weights, X, Z, p, d, q, P, D, Q, s, ncond)
+  
+  errs[!is.finite(errs)] <- 0 # or inf
+  
+  sumofsquares = sum(errs^2)/(NROW(X) - ncond)
+  return (sumofsquares)
+}
+
+arima_ssq_builtin = function (weights, X, p, d, q, P, D, Q, s, ncond){
+   model = arima(X, fixed = weights , order = c(p,d,q) ,  seasonal = list(order = c(P,D,Q) , period = s ), include.mean = FALSE, transform.pars = FALSE, method = c("CSS"), n.cond = ncond)
+   return (model$sigma2)
+}
+
+arima_css = function(weights, X, Z, p, d, q, P, D, Q, s, ncond){
+  #ssq = arima_ssq(weights, X, Z, p, d, q, P, D, Q, s, ncond)
+  ssq = arima_ssq_builtin (weights, X, p, 0, q, P, 0, Q, s, ncond) # use the builtin arima function instead to make sure the issues of the bfgs algorithm are really because of the bfgs algorithm and not caused by an error in the custom arima function
+  css = 0.5 * log(ssq)
+  
+  #return (ssq)
+  return (css)
+}
+
+```
+
+#Helper Functions
+```{r}
+
+gradFinitDifference = function(weights, X, Z, p, d, q, P, D, Q, s, ncond, ndeps){
+	y = matrix(0.0,NROW(weights),1)
+	for(i in 1:NROW(weights)){
+		enew = matrix(0.0,NROW(weights),1)
+		enew[i,1] = ndeps[i]
+		p1 = weights + enew
+		p2 = weights - enew
+		f1 = arima_css(p1, X, Z, p, d, q, P, D, Q, s, ncond)
+		f2 = arima_css(p2, X, Z, p, d, q, P, D, Q, s, ncond)
+		fooy = (f1 - f2)/(2*ndeps[i])
+		y[i,1] = fooy
+	}
+	return (y)
+}
+
+addDiagonalToMatrix = function (M, diagValue, diagSize){
+    diagonal = diag(nrow = diagSize) * diagValue
+    startRow = NROW(M) - diagSize + 1
+    endRow = NROW(M)
+    startCol = 1
+    endCol = diagSize
+    M[startRow:endRow, startCol:endCol] = M[startRow:endRow, startCol:endCol] + diagonal
+    return (M)
+}
+
+jacobi_solver = function (A, b, tolerance=1e-16, max_iterations=1000){
+    x = matrix(0, nrow(A), 1)
+  	iter = 0
+	diff = tolerance+1
+	diag_A = diag(A)
+	rest_A = A - diag(diag_A,nrow(A),nrow(A)) 
+	
+	
+	while(iter < max_iterations & diff > tolerance){
+		x_new =1/diag_A * (b - rest_A %*% x)
+		diff =sum(abs(x_new-x))
+		x = x_new
+		iter = iter + 1
+	}
+	#print("jacobi finised after iteration")
+	#print(iter)
+	return (x)
+}
+
+forwardsub_solver = function (A, b){
+    x = matrix(0, nrow(A), 1)
+    for (i in 1:nrow(A)){
+        x[i,1] = (b[i,1] - A[i,] %*% x[,1]) / A[i,i]
+    }
+    return (x)
+}
+```
+
+
+Functions for constructing helper Matrix Z // Only relevant when testing with custom arima function
+```{r}
+#inserts the first column of source matrix into the n-th column of target matrix with the specified row offset 
+addShiftedMatrix = function (targetMatrix,  sourceMatrix, rowOffset, nthColumn){
+    targetMatrix[(rowOffset+1):NROW(targetMatrix), nthColumn] = sourceMatrix[1:(NROW(targetMatrix)-rowOffset)]	
+	return (targetMatrix)
+}
+
+
+addValuesForCombinedModel = function (targetMatrix,sourceMatrix, nonSeasonalParam, seasonalParam, seasonality, columnOffset){
+    counter = 1
+	if (nonSeasonalParam > 0 && seasonalParam > 0){
+    	for	(k in 1:nonSeasonalParam){
+    		for(j in 1:seasonalParam){
+    			targetMatrix = addShiftedMatrix(targetMatrix, sourceMatrix, k + (j*seasonality), columnOffset + counter)
+    			counter = counter+1
+    		}
+    	}
+	}
+	return (targetMatrix)
+}
+
+#Construts Matrix Z with all values that can be used to calculate an approximation of the timeseries in X. 
+#Each row in Z is used to predict the value in the corresponding row of X
+#Columns of Z represent values used for predicting either AR, SAR, MA or SMA
+#p+P cols for ar & sar 
+#q+Q cols for ma & sma 
+#p*P cols for multiplicative SAR 
+#q*Q cols for multiplicative SMA 
+constructPredictorMatrix = function (X, p, d, q, P, D, Q, s, ncond){
+    Z = matrix(0, NROW(X), p + P + Q + q + p*P + q*Q)
+    
+    # fills Z with values used for non seasonal AR prediction
+    if (p > 0){
+      for(i in 1:p){
+        Z = addShiftedMatrix(Z, X, i, i)
+      }
+    }
+   
+    #prediction values for non seasonal MA 
+    if (q > 0){
+      for(i in 1:q){
+        Z = addShiftedMatrix(Z, X, i, p + i)
+      }
+    }
+    
+    #prediction values for seasonal AR 
+    if (P > 0){
+      for(i in 1:P){
+        Z = addShiftedMatrix(Z, X, (i * s), p + q + i)
+      }
+    }
+    
+    #prediction values for seasonal MA 
+    if (Q > 0){
+      for(i in 1:Q){
+        Z = addShiftedMatrix(Z, X, (i * s), p + q + P + i)
+      }  
+    }
+  
+  
+    #prediction values for combined models of non-seasonal and seasonal AR
+    #for multiplicative AR the sign has to be inverted
+    Z = addValuesForCombinedModel (Z, (-1) * X, p, P, s, p + P + q + Q)
+    
+    #prediction values for combined models of non-seasonal and seasonal MA
+    Z = addValuesForCombinedModel (Z, X, q, Q, s, p + P + q + Q + p*P)
+    
+    if (ncond > 0){
+	   Z[1:ncond,] = 0
+	   if (q > 0){
+	       for (i in 1:q){
+	            Z[1:min(ncond+i, NROW(Z)),(p+i)] = 0
+	       }
+	   }
+	   if (Q > 0){
+	       for (i in 1:Q){
+	            Z[1:min(ncond+(i*s), NROW(Z)),(p+q+P+i)] = 0
+	       }
+	   }
+	   if (q > 0 && Q > 0){
+           count = 1
+           for(i in 1:q){
+	          for(j in 1:Q){
+	             Z[1:min(ncond+(i+j*s), NROW(Z)),(p+q+P+Q+P*p+count)] = 0
+	             count = count + 1;
+	          }
+	       }
+	    }
+	}
+    
+    return (Z)
+}
+
+# Returns the differnced time series
+difference = function (X, d, D, s) {
+	# d-th order non seasonal differencing:
+	if (d > 0){
+        for(i in 1:d){
+    	    X[2:NROW(X)] = X[2:NROW(X)] - X[1:(NROW(X)-1)] 
+    	}
+    }
+	# D-th order seasonal differencing:
+	if (D > 0){
+        for(i in 1:D){
+    	    X[(s+1):NROW(X)] = X[(s+1):NROW(X)] - X[1:(NROW(X)-s)] 
+        }
+	}
+	
+    return (X)
+}
+```
+
+
+BFGS Implementation
+```{r}
+# L2 norm of descent direction at x
+L2norm = function (fx){
+  norm = (sum(fx^2))^0.5 
+  return (norm)
+}
+
+#Bactracking Line Search
+linesearch = function (searchDirection, fx, weights, X, Z, p, d, q, P, D, Q, s, ncond){
+  #TODO: What are the best starting paramters?
+  c = 0.5
+  r = 0.5
+  m = as.numeric(t(searchDirection)%*%searchDirection)
+  
+  #stepsize
+  ak = 1.0
+  new_weights = weights + ak*searchDirection
+  fxnew = arima_css(new_weights, X, Z, p, d, q, P, D, Q, s, ncond)
+      
+  while(fxnew > fx + c*ak*m){ 
+    ak = r*ak
+    new_weights = weights + ak*searchDirection
+    fxnew = arima_css(new_weights, X, Z, p, d, q, P, D, Q, s, ncond)
+  }
+  return (new_weights)
+}
+
+#Quasi Newton Optimizer: Broyden–Fletcher–Goldfarb–Shanno 
+bfgs_optimizer = function (X, Z, max_iterations, p, d, q, P, D, Q, s, ncond, ndeps){
+  nParam = p+P+q+Q 
+  
+  weights = matrix(0.0, nParam, 1)
+  fx = arima_css(weights, X, Z, p, d, q, P, D, Q, s, ncond)
+  gx = gradFinitDifference(weights, X, Z, p, d, q, P, D, Q, s, ncond, ndeps)
+  norm_gx = L2norm(gx) 
+  
+  #The approximated inverse hessian 
+  B = diag(1, nParam) 
+  
+  iter = 0
+  tol = 1.5 * 10^(-16)
+  diff = tol +1
+  while(norm_gx > tol & iter < max_iterations & diff > tol){
+    #debug outputs
+    print("best weights:")
+    print(weights)
+    print("bfgs iteration:")
+    print(iter)
+    print("fx:")
+    print(fx)
+    
+    #1. + 2. step
+    new_weights = linesearch ((-B%*%gx), fx, weights, X, Z, p, d, q, P, D, Q, s, ncond)
+    
+    fxnew = arima_css(new_weights, X, Z, p, d, q, P, D, Q, s, ncond)
+    gxnew = gradFinitDifference(new_weights, X, Z, p, d, q, P, D, Q, s, ncond, ndeps)
+    
+    #3. step
+    ss = new_weights - weights # = stepsize * searchDirection
+    weights = new_weights
+    
+    #4. step
+    yk = gxnew - gx
+    if (sum(yk) == 0) break; # prevent from dividing by zero in the next line
+    
+    #5. step
+    # update B for next step
+    FT = as.numeric(t(ss)%*%yk + t(yk)%*%B%*%yk)*ss%*%t(ss)/as.numeric(t(ss)%*%yk)^2
+    ST = (B%*%(yk%*%t(ss)) + (ss%*%t(yk))%*%B)/as.numeric(t(ss)%*%yk)
+    
+    B = B + FT - ST
+    
+    diff = abs(fx - fxnew)
+    fx = fxnew
+    gx = gxnew
+    norm_gx = L2norm(gx)
+    iter = iter +1
+  }
+  print("BFGS finished with iterations:")
+  print(iter)
+  return (weights)
+}
+
+```
+
+
+```{r}
+custom_arima = function (X, max_iterations, p, d, q, P, D, Q, s, ndeps){
+    ncond = d + D*s + p + P*s
+    diffX = difference(X, d, D, s)
+    Z = constructPredictorMatrix(diffX, p, d, q, P, D, Q, s, ncond) 
+   
+    return (bfgs_optimizer (diffX, Z, max_iterations, p, d, q, P, D, Q, s, ncond, ndeps))
+}
+
+mixedArima <- function (X, max_iterations, p, d, q, P, D, Q, s, ndeps){
+    ncond = d + D*s + p + P*s
+    diffX = difference(X, d, D, s)
+    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s, ncond)
+    
+    armaCSS <- function(weights){
+        res <- arima_css(weights, diffX, Z, p, d, q, P, D, Q, s, ncond)
+    }
+    
+    armaCSSGradient<- function(weights){
+        res <- gradFinitDifference(weights, diffX, Z, p, d, q, P, D, Q, s, ncond, ndeps)
+    }
+    
+    init = rep.int(0, p+q+P+Q)
+    res <- optim(
+        init,
+        armaCSS,
+        gr = armaCSSGradient,
+        method = "BFGS",
+        hessian = FALSE,
+        control = list(maxit = max_iterations)
+    )
+}
+
+# Runs multiple versions of ARIMA:
+# custom: Optimizer and ARIMA function implemented in this notebook
+# mixed: ARIMA function implemented in this notebook, but optim from R base
+# builtin: Optimizer and ARIMA function from R's stats libray
+arimamodels = function (X, max_iterations, p, d, q, P, D, Q, s){
+    browser()
+    #ndeps is a vector of step sizes for the finite-difference approximation for the gradient 
+    ndeps = rep.int(1e-4, p+q+P+Q)
+
+    custom_arimamodel = custom_arima (X, max_iterations, p, d, q, P, D, Q, s, ndeps)
+    
+    nonseasonalOrder = c(p,d,q)
+    seasonalOrder = list(order = c(P,D,Q) , period = s )
+    
+    builtin_arimamodel = arima(X , order = nonseasonalOrder,  seasonal = seasonalOrder, include.mean = FALSE, transform.pars = FALSE, method = c("CSS"), optim.method = "BFGS", optim.control = list(maxit = max_iterations, ndeps = ndeps))
+    
+    mixed_arimamodel = mixedArima (X, max_iterations, p, d, q, P, D, Q, s, ndeps)
+    return (list ("custom" = custom_arimamodel, "builtin" = builtin_arimamodel, "mixed" = mixed_arimamodel))
+}
+```
+
+Util functions for comparison of ARIMA models
+```{r}
+allAbsolutDiffs = function (As, Bs){
+    allDiffs = c()
+    for (i in 1:length(As)){
+        allDiffs[i]= abs(As[i]-Bs[i])
+    }
+    return (matrix(allDiffs))
+}
+
+compareArima = function (model1, model2){
+    diffs = allAbsolutDiffs(model1, model2);
+    return (list ("all" = diffs, "max" = max(diffs), "min" = min (diffs), "mean" = mean(diffs), "sum" = sum(abs(diffs))));
+}
+```
+
+Load Time Series X:
+```{r}
+library(zoo)
+
+folderpath = "~/Desktop/DHBW/Studienarbeit/data/multiple_household_power_consumption/Individual_Households/"
+filename = "MT_225-ResampledW-householddata.csv"
+weeklyData = file(paste(folderpath, filename, sep=""))
+
+X <- read.zoo(weeklyData, header = FALSE, sep = ";", index.column = list(1))
+X <- ts(X)
+plot (X)
+```
+
+```{r}
+#arimamodels() is implemented so that the second paramter "maxiterations" is applies to all three algorithms.
+#Therefore each single iteration/step of BFGS can be examined by starting with maxiterations = 1 and increasing it
+#arima_models = arimamodels(X, 100, 3, 0, 6, 0, 0, 0, 2)
+
+# This configuration produces models that are all off by ~0.4 and ~0.5 when using sum of squares.
+# Using log of the sum of squares results in a much better result for the mixed model and a slighly better one for the custom model
+# To switch between sum of squares and the log of ssq change the return value of the arima_css function in line 74
+#arima_models = arimamodels(X, 100, 2, 1, 3, 3, 1, 3, 2)
+
+# When using log of ssq and ndeps = 1e-3 (configured in arimamodels function line 384) the custom bfgs algorithm crashes.
+# The reason for this is that the gradient in the 16th iteration of the bfgs loop is evaluated with one of the values = -Inf
+# This results in the BFGS Update to produce a new Hessian matrix consisting only out of NaN values, making the algorithm crash in the following iteration
+# Changing ndeps to 1e-4 is a workaround to fix the issue (crashing) for this particular case. 
+# However, the result of the custom model is completly off (by ~99.0 on average!) 
+#arima_models = arimamodels(X, 100, 3, 0, 3, 0, 0, 0, 2)
+
+# The error of the custom model for this case reduces drasticly if we set the differencing order d = 1
+# arima_models = arimamodels(X, 100, 3, 1, 3, 0, 0, 0, 2)
+
+# For P = 1 the custom model is also working fairly well 
+# Converging in 9 iterations of bfgs
+#arima_models = arimamodels(X, 100, 0, 0, 0, 1, 0, 0, 52)
+
+# For P = 2 the custom model is already getting much worse: average error of ~ 0.28
+# Converging in 3 iterations of bfgs
+#arima_models = arimamodels(X, 100, 0, 0, 0, 2, 0, 0, 52)
+
+# And for P = 3 the custom model is more than completely useless with an average errof of ~ 2.5e10 
+# Converging in 52 iterations of bfgs (Also each iteration takes much longer then p=2)
+#arima_models = arimamodels(X, 100, 0, 0, 0, 3, 0, 0, 52)
+
+# Q = 3 works just fine with an average error of ~ 2e-05
+#arima_models = arimamodels(X, 100, 0, 0, 0, 0, 0, 3, 52)
+
+# q = Q = 3 also works fine with an average error of ~ 4e-05
+#arima_models = arimamodels(X, 100, 0, 0, 3, 0, 0, 3, 52)
+
+# q = Q = 3 also works fine with additional differncing
+arima_models = arimamodels(X, 100, 0, 1, 3, 0, 1, 3, 52)
+
+
+builtin_coef =arima_models$builtin$coef
+mixed_coef = arima_models$mixed$par
+custom_coef = arima_models$custom
+
+comparisonCustomToBuiltin = compareArima(builtin_coef, custom_coef)
+comparisonCustomToMixed = compareArima(custom_coef, mixed_coef)
+comparisonMixedToBuiltin = compareArima(builtin_coef, mixed_coef)
+
+
+print("Comparisons:")
+print (cbind (builtin_coef, mixed_coef, custom_coef))
+print (cbind(comparisonMixedToBuiltin, comparisonCustomToMixed, comparisonCustomToBuiltin))
+```
+

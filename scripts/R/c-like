@@ -1,0 +1,62 @@
+
+arima_residuals_c_like = function(weights, X, p, d, q, P, D, Q, s, ncond){
+    residuals = matrix(0, nrow = NROW(X), ncol = 1);
+
+    phi = weights$phi
+    theta = weights$theta
+
+    if (ncond < NROW(X)){
+        for (l in (ncond+1):NROW(X)){
+            tmp = X[l]
+
+            if ((p+P*s) > 0){
+                for (i in 1:(p+P*s)){
+                  tmp = tmp - (phi[i] * X[l - i])
+                }
+            }
+            if ((q+Q*s) > 0){
+                for (j in 1:(q+Q*s)){
+                    if (l - j > 0){
+                        tmp = tmp - (theta[j] * residuals[l - j])
+                    }
+                }
+            }
+            residuals[l] = tmp
+        }
+    }
+    return (residuals)
+}
+
+transformParamsMultiplicative = function (weights, p, d, q, P, D, Q, s){
+    phi = matrix(0, nrow = p+P*s, ncol = 1)
+    theta = matrix(0, nrow = q+Q*s, ncol = 1)
+
+    if(p > 0) phi[1:p] = weights[1:(p)]
+    if(q > 0) theta[1:q] = weights[(p+1):(p+q)]
+
+    if (P > 0){
+        for (j in 1:P){
+            phi[(j*s)] = phi[(j*s)] + weights[(p+q+j)]
+            if (p > 0){
+                for (i in 1:p){
+                    weigthsProduct = weights[(p+q+j)] * weights[i]
+                    phi[((j*s)+i)] = phi[((j*s)+i)] - weigthsProduct
+                }
+            }
+        }
+    }
+
+    if (Q > 0){
+        for (j in 1:Q){
+            theta[(j*s)] = theta[(j*s)] + weights[(p+q+P+j)]
+            if (q > 0){
+                for (i in 1:q){
+                    weigthsProduct = weights[(p+q+P+j)] * weights[p+i]
+                    theta[((j*s)+i)] = theta[((j*s)+i)] + weigthsProduct
+                }
+            }
+        }
+    }
+
+    return (list("phi" = phi, "theta" = theta))
+}

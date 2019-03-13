@@ -1,0 +1,14 @@
+ee8fb4173d7a17d5dd1675e5e190c54f *DESCRIPTION
+7506bce6c0764c08ba58cefb231374b0 *NAMESPACE
+4fe58880e67ce7acd38bb59f8f16a3ce *R/JacobiR.R
+dc544f1e5b3bcd0e11ff5b341c4f6e9a *R/RcppExports.R
+2227a6508ff5e0fec4533beb750edd88 *build/vignette.rds
+2609a318bae9c9e10b6b3993fdec6102 *inst/doc/JacobiEigen.R
+2ee4a6a475a15c38610f2419ed255b4c *inst/doc/JacobiEigen.Rmd
+16512fff47589e7aafd8f73a66f47388 *inst/doc/JacobiEigen.pdf
+0000c580ca440bbacc2128a932de68bd *man/Jacobi.Rd
+ff052f760974c0a13c6046b384a9226f *man/JacobiR.Rd
+26a5f7032578c368345f54bcf29e25f1 *src/JacobiCpp.cpp
+5097f2fafb3b84b2d998598d2de02aab *src/RcppExports.cpp
+2ee4a6a475a15c38610f2419ed255b4c *vignettes/JacobiEigen.Rmd
+26992afcd56a6e60d0dac3addbb5af43 *vignettes/header.tex

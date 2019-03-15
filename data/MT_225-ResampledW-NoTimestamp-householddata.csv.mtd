@@ -1,0 +1,11 @@
+{
+    "data_type": "matrix",
+    "value_type": "double",
+    "rows": 210,
+    "cols": 1,
+    "nnz": 210,
+    "format": "csv",
+    "header": false,
+    "sep": ",",
+    "description": { "author": "Tobias Schmidt" }
+}

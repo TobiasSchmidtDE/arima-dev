@@ -77,6 +77,7 @@ arima_residualsdml = function(weights, X, Z, p, d, q, P, D, Q, s, ncond){
 
 
 arima_css = function(weights, X, Z, p, d, q, P, D, Q, s, ncond){
+ #   return (0.5 * log(arima_css_c(weights, X, p, d, q, P, D, Q, s)))
   errs = arima_residualsdml (weights, X, Z, p, d, q, P, D, Q, s, ncond)
   
   errs[!is.finite(errs)] <- 0 # or inf
@@ -160,7 +161,7 @@ transformParamsMultiplicative = function (weights, p, d, q, P, D, Q, s){
 
 arima_css_c = function (weights, X, p, d, q, P, D, Q, s){
    model = arima(X, fixed = weights , order = c(p,d,q) ,  seasonal = list(order = c(P,D,Q) , period = s ), include.mean = FALSE, transform.pars = FALSE, method = c("CSS"))
-   return (model$sigma2)
+   return (0.5 * log(model$sigma2))
 }
 
 arima_residuals_c = function (weights, X, Z, p, d, q, P, D, Q, s, ncond){
@@ -250,7 +251,7 @@ L2norm = function (fx){
 linesearch = function (searchDirection, fx, weights, X, Z, p, d, q, P, D, Q, s, ncond){
   #TODO: What are the best starting paramters?
   c = 0.5
-  r = 0.9
+  r = 0.5
   m = as.numeric(t(searchDirection)%*%searchDirection)
   
   #stepsize
@@ -262,6 +263,9 @@ linesearch = function (searchDirection, fx, weights, X, Z, p, d, q, P, D, Q, s, 
     ak = r*ak
     new_weights = weights + ak*searchDirection
     fxnew = arima_css(new_weights, X, Z, p, d, q, P, D, Q, s, ncond)
+    if (is.na(fxnew)) {
+        browser()
+    }
   }
   return (new_weights)
 }
@@ -282,15 +286,15 @@ bfgs_optimizer = function (X, Z, max_iterations, p, d, q, P, D, Q, s, ncond){
   tol = 1.5 * 10^(-16)
   diff = tol +1
   while(norm_gx > tol & iter < max_iterations & diff > tol){
-    if (iter == 51){
-       #browser()
+    if (iter == 16){
+       browser()
     }
     print("best weights:")
     print(weights)
     print("bfgs iteration:")
     print(iter)
-    print("improvement:")
-    print(diff)
+    print("fx:")
+    print(fx)
     
     #1. + 2. step
     new_weights = linesearch ((-B%*%gx), fx, weights, X, Z, p, d, q, P, D, Q, s, ncond)
@@ -304,7 +308,7 @@ bfgs_optimizer = function (X, Z, max_iterations, p, d, q, P, D, Q, s, ncond){
     
     #4. step
     yk = gxnew - gx
-    if (yk == 0) break; # prevent from dividing by zero in the next line
+    if (sum(yk) == 0) break; # prevent from dividing by zero in the next line
     
     #5. step
     # inverse B for next step
@@ -398,19 +402,19 @@ constructPredictorMatrix = function (X, p, d, q, P, D, Q, s, ncond){
 	   Z[1:ncond,] = 0
 	   if (q > 0){
 	       for (i in 1:q){
-	            Z[1:(ncond+i),(p+i)] = 0
+	            Z[1:min(ncond+i, NROW(Z)),(p+i)] = 0
 	       }
 	   }
 	   if (Q > 0){
 	       for (i in 1:Q){
-	            Z[1:(ncond+(i*s)),(p+q+P+i)] = 0
+	            Z[1:min(ncond+(i*s), NROW(Z)),(p+q+P+i)] = 0
 	       }
 	   }
 	   if (q > 0 && Q > 0){
            count = 1
            for(i in 1:q){
 	          for(j in 1:Q){
-	             Z[1:(ncond+(i+j*s)),(p+q+P+Q+P*p+count)] = 0
+	             Z[1:min(ncond+(i+j*s), NROW(Z)),(p+q+P+Q+P*p+count)] = 0
 	             count = count + 1;
 	          }
 	       }
@@ -440,18 +444,19 @@ difference = function (X, d, D, s) {
 
 ```{r}
 custom_arima = function (X, max_iterations, p, d, q, P, D, Q, s){
-    diffX = difference(X, d, D, s)
-    Z = constructPredictorMatrix(diffX, p, d, q, P, D, Q, s) 
-   
     ncond = d + D*s + p + P*s
+    
+    diffX = difference(X, d, D, s)
+    Z = constructPredictorMatrix(diffX, p, d, q, P, D, Q, s, ncond) 
+   
     return (bfgs_optimizer (diffX, Z, max_iterations, p, d, q, P, D, Q, s, ncond))
 }
 
 mixedArima <- function (X, max_iterations, p, d, q, P, D, Q, s){
-    diffX = difference(X, d, D, s)
-    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s)
-    
     ncond = d + D*s + p + P*s
+    diffX = difference(X, d, D, s)
+    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s, ncond)
+    
     armaCSS <- function(weights)
         {
              
@@ -561,7 +566,7 @@ arimaResiduals = function (X, weights, p, d, q, P, D, Q, s){
     
     ncond = d + D*s + p + P*s
     diffX = difference(X, d, D, s)
-    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s)
+    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s, ncond)
     custom_residuals = arima_residualsdml(weights, diffX, Z, p, d, q, P, D, Q, s, ncond)
     builtin_residuals = arima_residuals_c(weights, X, Z, p, d, q, P, D, Q, s, ncond)
     
@@ -570,9 +575,9 @@ arimaResiduals = function (X, weights, p, d, q, P, D, Q, s){
 
 arima_predict_css = function (X, weights, p, d, q, P, D, Q, s){
     browser()
-    diffX = difference(X, d, D, s)
-    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s)
     ncond = d + D*s + p + P*s
+    diffX = difference(X, d, D, s)
+    Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s, ncond)
     
     #css_r = arima_css(weights, X, Z, p, d, q, P, D, Q, s)
     css_r = arima_css(weights, diffX, Z, p, d, q, P, D, Q, s, ncond)
@@ -583,9 +588,9 @@ arima_predict_css = function (X, weights, p, d, q, P, D, Q, s){
 
 arimaGrad = function (X, weights, p, d, q, P, D, Q, s){
     browser()
-    Z = constructPredictorMatrix (X, p, d, q, P, D, Q, s)
-    
     ncond = d + D*s + p + P*s
+    Z = constructPredictorMatrix (X, p, d, q, P, D, Q, s, ncond)
+    
     arima_css_wrapper = function (w) {
         return (arima_css( w, X, Z, p, d, q, P, D, Q, s, ncond))
     }
@@ -645,7 +650,7 @@ X_acf = acf(seasonalfirstDiff, lag.max = 1500)
 
 RUN ARMA
 ```{r}
-arima_models = arimamodels(X, 2, 3, 0, 3, 0, 0, 0, 2)
+arima_models = arimamodels(X, 100, 2, 1, 2, 2, 0, 0, 2)
 
 builtin_coef =arima_models$builtin$coef
 mixed_coef = arima_models$mixed$par
@@ -688,13 +693,6 @@ print (cbind(comparisonBFGS_NelderMead, comparisonCG_NelderMead, comparisonCG_BF
 
 ```
 
-```{r}
-plotArima(X, 1, 0, 0, 0, 10)
-```
-```{r}
-plotArima(X, 1, 0, 0, 0, 10)
-```
-
 
 ```{r}
 
@@ -708,7 +706,7 @@ print (comparison$max)
 ```
 
 ```{r}
-jacobi_solver = function (A, b, tolerance=1e-16, max_iterations=1000){
+jacobi_solver = function (A, b, tolerance=1e-4, max_iterations=1000){
     x = matrix(0, nrow(A), 1)
   	iter = 0
 	diff = tolerance+1
@@ -745,17 +743,10 @@ print(cbind(calc_x, random_x, calc_x-random_x))
 
 
 ```{r}
- 
-testweights = c(8.565512,
-                8.549562,
-                8.613250,
-                12.626212,
-                7.071511,
-                3.130054)
 
-#testweights = rep.int(1, 10)
-residuals = arimaResiduals (X, testweights,  3, 0, 3, 0, 0, 0, 2)
-css = arima_predict_css(X, testweights, 3, 0, 3, 0, 0, 0, 2)
+testweights = rep.int(0.5, 8)
+residuals = arimaResiduals (X, testweights,  2, 50, 2, 2, 1, 2, 12)
+css = arima_predict_css(X, testweights, 2, 50, 2, 2, 1, 2, 12)
 
 comparison_res = compareArima(residuals$custom, residuals$builtin)
 relativecomparison_res = compareArimaRelative(residuals$custom, residuals$builtin)
@@ -763,7 +754,7 @@ relativecomparison_res = compareArimaRelative(residuals$custom, residuals$builti
 comparison_css = compareArima(css$custom, css$builtin)
 relativecomparison_css = compareArimaRelative(css$custom, css$builtin)
 
-print (cbind(comparison_res$all, relativecomparison_res$all, residuals$custom, residuals$builtin))
+#print (cbind(comparison_res$all, relativecomparison_res$all, residuals$custom, residuals$builtin))
 print(css)
 print (cbind(comparison_res))
 print (cbind(relativecomparison_res))
@@ -772,18 +763,6 @@ print (cbind(relativecomparison_css))
 ```
 
 
-```{r}
-
-#testweights = c(0.2, 0.1, 0.54, 0.2, 0.1, 0.54, 0.02, 0.02)
-X = c(1, -2, 3, 2, 1, -2, 3, 2)
-testweights = rep.int(2, 4)
-grad = arimaGrad (X, testweights, 4, 0, 0, 0, 3)
-comparisongrad = compareArima(grad$finite, grad$direct)
-
-print (cbind(grad$finite, grad$direct))
-
-print (comparisongrad)
-```
 
 ```{r}
 init = rep.int(0, 2)
@@ -796,6 +775,8 @@ res <- optim(
 )
 res
 ```
+
+
 ```{r}
 rosenbrocks = function (x, y){
     res = matrix(0, NROW(x), NROW(y))

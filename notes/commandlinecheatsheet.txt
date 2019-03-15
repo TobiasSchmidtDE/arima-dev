@@ -12,6 +12,8 @@ spark-submit %systemmljar% -f C:\Users\TobiasSchmidt\Desktop\IBM\PE_4\SystemML\d
 
 ssh de163360@dml1.almaden.ibm.com
 
+mvn -DskipTests clean verify
+
 cluster:
 
 hdfs (hadoop distributed file system)

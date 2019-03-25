@@ -7,12 +7,14 @@ ARIMA CSS:
 ```{r}
 
 addDiagonalToMatrix = function (M, diagValue, diagSize){
-    diagonal = diag(nrow = diagSize) * diagValue
-    startRow = NROW(M) - diagSize + 1
-    endRow = NROW(M)
-    startCol = 1
-    endCol = diagSize
-    M[startRow:endRow, startCol:endCol] = M[startRow:endRow, startCol:endCol] + diagonal
+    if (diagSize > 0){
+        diagonal = diag(nrow = diagSize) * diagValue
+        startRow = NROW(M) - diagSize + 1
+        endRow = NROW(M)
+        startCol = 1
+        endCol = diagSize
+        M[startRow:endRow, startCol:endCol] = M[startRow:endRow, startCol:endCol] + diagonal
+    }
     return (M)
 }
 
@@ -59,7 +61,7 @@ arima_predictdml = function(weights, Z, p, d, q, P, D, Q, s, ncond){
 	    }
 	}
 
-    x_hat = forwardsub_solver (A, b)
+    x_hat = jacobi_solver (A, b)
 	return (x_hat)
 }
 
@@ -333,7 +335,9 @@ bfgs_optimizer = function (X, Z, max_iterations, p, d, q, P, D, Q, s, ncond){
 ```{r}
 #inserts the first column of source matrix into the n-th column of target matrix with the specified row offset 
 addShiftedMatrix = function (targetMatrix,  sourceMatrix, rowOffset, nthColumn){
-    targetMatrix[(rowOffset+1):NROW(targetMatrix), nthColumn] = sourceMatrix[1:(NROW(targetMatrix)-rowOffset)]	
+    if (rowOffset < NROW(targetMatrix)){
+        targetMatrix[(rowOffset+1):NROW(targetMatrix), nthColumn] = sourceMatrix[1:(NROW(targetMatrix)-rowOffset)]
+    }
 	return (targetMatrix)
 }
 
@@ -564,11 +568,13 @@ arimaResiduals = function (X, weights, p, d, q, P, D, Q, s){
     #print(weights)
     #print(transformParamsMultiplicative(weights, p, d, q, P, D, Q, s))
     
+    
     ncond = d + D*s + p + P*s
     diffX = difference(X, d, D, s)
     Z = constructPredictorMatrix (diffX, p, d, q, P, D, Q, s, ncond)
-    custom_residuals = arima_residualsdml(weights, diffX, Z, p, d, q, P, D, Q, s, ncond)
+    
     builtin_residuals = arima_residuals_c(weights, X, Z, p, d, q, P, D, Q, s, ncond)
+    custom_residuals = arima_residualsdml(weights, diffX, Z, p, d, q, P, D, Q, s, ncond)
     
     return (list ("custom" = custom_residuals, "builtin" = builtin_residuals))
 }
@@ -621,6 +627,7 @@ compareArimaRelative = function (model1, model2){
 ```{r}
 library(forecast)
 library(zoo)
+library(Matrix)
 model <- Arima(y= c(0,0,0,0) , order=c(1,0,0), seasonal=list(order = c(0, 0, 0) , period = 3 ),
              fixed=c(0.8, -0.4))
 
@@ -635,9 +642,12 @@ dailyData = file(paste(folder_Individual_Households, resamplePrefix, "D", resamp
 weeklyData = file(paste(folder_Individual_Households, resamplePrefix, "W", resampleSuffix, sep=""))
 monthlyData = file(paste(folder_Individual_Households, resamplePrefix, "M", resampleSuffix, sep=""))
 
+testdata = "~/Desktop/DHBW/Studienarbeit/scripts/performanceTest/in/testdata500.mtx"
+
 X <- read.zoo(weeklyData, header = FALSE, sep = ";", index.column = list(1))
+X <- as.matrix(readMM(testdata))
 X <- ts(X)
-firstDiff = difference(X, 1, 0, 0)
+firstDiff = difference(X, 2, 0, 0)
 seasonalfirstDiff = difference(X, 1,1, 52)
 plot (X)
 plot (firstDiff)
@@ -650,7 +660,7 @@ X_acf = acf(seasonalfirstDiff, lag.max = 1500)
 
 RUN ARMA
 ```{r}
-arima_models = arimamodels(X, 100, 2, 1, 2, 2, 0, 0, 2)
+arima_models = arimamodels(X, 100, 0, 0, 9, 0, 0, 0, 2)
 
 builtin_coef =arima_models$builtin$coef
 mixed_coef = arima_models$mixed$par
@@ -716,6 +726,9 @@ jacobi_solver = function (A, b, tolerance=1e-4, max_iterations=1000){
 	
 	while(iter < max_iterations & diff > tolerance){
 		x_new =1/diag_A * (b - rest_A %*% x)
+		if (anyNA(x_new)){
+		    break;
+		}
 		diff =sum(abs(x_new-x))
 		x = x_new
 		iter = iter + 1
@@ -729,14 +742,57 @@ forwardsub_solver = function (A, b){
     x = matrix(0, nrow(A), 1)
     for (i in 1:nrow(A)){
         x[i,1] = (b[i,1] - A[i,] %*% x[,1]) / A[i,i]
+        if (is.na(x[i,1])){
+            browser()
+        }
     }
     return (x)
 }
 
-random_A = rbind(c(10, -1, 2, 0), c(-1, 11, -1, 3), c(2,-1,10,-1), c(0, 3, -1, 8))
+
+L_triangular_inv = function(L) {
+  n = NCOL(L)
+  r = NROW(L)
+
+  if (n == 1) {
+    A = 1/L
+  }
+  else if (n == 2) {
+    A = matrix(0, 2, 2)
+    A[1,1] = L[2,2]
+    A[2,2] = L[1,1]
+    A[2,1] = -L[2,1]
+    A = A/as.numeric(L[1,1] * L[2,2])
+
+  }
+  else {
+    k = as.integer(floor(n/2))
+
+    L11 = L[1:k,1:k]
+    L21 = L[(k+1):n,1:k]
+    L22 = L[(k+1):n,(k+1):n]
+
+    A11 = L_triangular_inv(L11)
+    A22 = L_triangular_inv(L22)
+    A12 = matrix(0, NROW(A11), NCOL(A22))
+    A21 = -A22 %*% L21 %*% A11
+    if (anyNA(A21)){
+        browser()
+    }
+    A = rbind(cbind(A11, A12), cbind(A21, A22))
+  }
+  return (A)
+}
+
+inverse_solver = function (A, b){
+    invA = L_triangular_inv(A)
+    return (invA %*% b)
+}
+
+random_A = rbind(c(1, 0, 0, 0), c(-11, 1, 0, 0), c(2,-10,1,0), c(2, 3, -1, 8))
 random_x = matrix(c(1, 2, -1, 1))
 test_b = random_A %*% random_x
-calc_x = jacobi_solver(random_A, test_b)
+calc_x = inverse_solver(random_A, test_b)
 print(cbind(calc_x, random_x, calc_x-random_x))
 ```
 
@@ -744,22 +800,24 @@ print(cbind(calc_x, random_x, calc_x-random_x))
 
 ```{r}
 
-testweights = rep.int(0.5, 8)
-residuals = arimaResiduals (X, testweights,  2, 50, 2, 2, 1, 2, 12)
-css = arima_predict_css(X, testweights, 2, 50, 2, 2, 1, 2, 12)
+testweights = rep.int(0.5, 12)
+#testweights = as.matrix(readMM("~/Desktop/DHBW/Studienarbeit/scripts/performanceTest/in/testweights.mtx"))
+residuals = arimaResiduals (X[1:50], testweights, 0, 0, 6, 0, 0, 6, 12)
+#css = arima_predict_css(X, testweights, 15, 1, 15, 15, 1, 15, 2)
 
 comparison_res = compareArima(residuals$custom, residuals$builtin)
 relativecomparison_res = compareArimaRelative(residuals$custom, residuals$builtin)
 
-comparison_css = compareArima(css$custom, css$builtin)
-relativecomparison_css = compareArimaRelative(css$custom, css$builtin)
+#comparison_css = compareArima(css$custom, css$builtin)
+#relativecomparison_css = compareArimaRelative(css$custom, css$builtin)
 
-#print (cbind(comparison_res$all, relativecomparison_res$all, residuals$custom, residuals$builtin))
-print(css)
+print (cbind(comparison_res$all, relativecomparison_res$all, residuals$custom, residuals$builtin))
+#print(css)
 print (cbind(comparison_res))
 print (cbind(relativecomparison_res))
-print (cbind(comparison_css))
-print (cbind(relativecomparison_css))
+#print (cbind(comparison_css))
+#print (cbind(relativecomparison_css))
+#print(cbind(residuals$builtin, residuals$custom))
 ```
 
 

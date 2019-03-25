@@ -1,3 +1,6 @@
+scripts/performanceTest/in
+scripts/performanceTest/out
+scripts/performanceTest/*.csv*
 testR/
 data/individual_household_power_consumption_detailed/
 data/multiple_household_power_consumption/

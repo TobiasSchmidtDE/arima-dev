@@ -61,7 +61,7 @@ arima_predictdml = function(weights, Z, p, d, q, P, D, Q, s, ncond){
 	    }
 	}
 
-    x_hat = jacobi_solver (A, b)
+    x_hat = forwardsub_solver (A, b)
 	return (x_hat)
 }
 
@@ -802,7 +802,7 @@ print(cbind(calc_x, random_x, calc_x-random_x))
 
 testweights = rep.int(0.5, 12)
 #testweights = as.matrix(readMM("~/Desktop/DHBW/Studienarbeit/scripts/performanceTest/in/testweights.mtx"))
-residuals = arimaResiduals (X[1:50], testweights, 0, 0, 6, 0, 0, 6, 12)
+residuals = arimaResiduals (X[1:50], testweights, 0, 0, 6, 0, 0, 6, 18)
 #css = arima_predict_css(X, testweights, 15, 1, 15, 15, 1, 15, 2)
 
 comparison_res = compareArima(residuals$custom, residuals$builtin)

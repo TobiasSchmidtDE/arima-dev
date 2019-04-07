@@ -5,6 +5,7 @@ weightsprefix = "model_"
 matrixsuffix = ".mtx"
 
 generateMatrix = function (Integer size, String folder, String prefix, String suffix, Boolean smallWeights){
+  print("generateMatrix size " + size)
   if (size != 0){
     print("Generating timeseries with size = " + size)
     timeseries = rand(rows=size, cols=1, sparsity=1.0, pdf="normal")
@@ -17,8 +18,9 @@ generateMatrix = function (Integer size, String folder, String prefix, String su
   }
 }
 
-generateMultipleTS = function (Integer factor, String folder, String prefix, String suffix){
-  for (step in seq(0, 999, 50)){
+generateMultipleTS = function (Integer factor, String folder, String prefix, String suffix, Integer start, Integer end, Integer step){
+  generateMatrix (factor, folder, prefix + "1", suffix, FALSE)
+  for (step in seq(start, end, step)){
       generateMatrix ((step * factor), folder, prefix + step, suffix, FALSE)
   }
 }
@@ -29,13 +31,17 @@ generateMultipleModels = function (String folder, String prefix, String suffix, 
   }
 }
 
+print("weightsfolder is " + weightsfolder)
 generateMultipleModels(weightsfolder, weightsprefix, matrixsuffix, FALSE)
 generateMultipleModels(weightsfolder, weightsprefix, "_small"+matrixsuffix, TRUE)
 
 
 # Files of first two generateMultipleTS only ~250MByte
-generateMultipleTS(1, timeseriesfolder, tsprefix, matrixsuffix)
-generateMultipleTS(1E3, timeseriesfolder, tsprefix, "K"+matrixsuffix)
+generateMultipleTS(1E0, timeseriesfolder, tsprefix, matrixsuffix, 0, 999, 50)
+generateMultipleTS(1E3, timeseriesfolder, tsprefix, "K"+matrixsuffix, 0, 999, 50)
 
-# But this one already generated 35 GByte before it reached the 400M file
-generateMultipleTS(1E6, timeseriesfolder, tsprefix, "M"+matrixsuffix)
+# This will generate about 250GB
+generateMultipleTS(1E6, timeseriesfolder, tsprefix, "M"+matrixsuffix, 0, 999, 50)
+
+# About 5 TB
+generateMultipleTS(1E9, timeseriesfolder, tsprefix, "G"+matrixsuffix, 0, 101, 10)

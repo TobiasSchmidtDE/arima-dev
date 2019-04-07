@@ -1,0 +1,12 @@
+anyNA = function (Matrix[Double] m ) return (Boolean hasNA){
+  hasNA = FALSE
+  counter = 0
+  while (counter <= 10){
+    print(counter)
+    counter = counter +1
+  }
+}
+
+testmatrix = matrix(0, 100, 1)
+result = anyNA(testmatrix)
+print(result)

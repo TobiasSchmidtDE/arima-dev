@@ -1,3 +1,6 @@
+scripts/arima-residuals.csv
+scripts/testdata*
+scripts/testweights*
 scripts/performanceTest/.Rhistory
 scripts/performanceTest/in
 scripts/performanceTest/out

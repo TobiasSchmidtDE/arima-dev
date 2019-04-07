@@ -17,6 +17,7 @@ do
     "systemml") systemml_jar=$VALUE;;
     "driver-memory") driver_memory=$VALUE;;
     "executor-memory") executor_memory=$VALUE;;
+    "exec_mode") exec_mode=$VALUE;;
     "-usehdfs") usehdfs=TRUE;;
   esac
 done
@@ -72,9 +73,19 @@ then
   testOut="out/results_"$(timestamp)"_"$config
 fi
 
+if [ -z "$exec_mode" ]
+then
+  exec_mode="singlenode"
+fi
+
+
 dml_out=out/dml/
 r_out=out/r/
 error_out=out/error/
+
+mkdir -p $dml_out
+mkdir -p $r_out
+mkdir -p $error_out
 
 if test $usehdfs = TRUE
 then
@@ -83,56 +94,104 @@ then
   hdfs dfs -mkdir -p $error_out
 fi
 
-echo "X_src,weigths_src,residuals_out,solver,p,d,q,P,D,Q,s,dml_exec_time,dml_result,r_exec_time,r_result,errormsg"> "$testOut"
+echo "X_src,weigths_src,residuals_out,solver,p,d,q,P,D,Q,s,Xsize,r_exec_time,r_run_time,r_result,dml_elapsed_time,dml_compilation_time,dml_execution_time,dml_result,heavy_hitter_instruction_1,heavy_hitter_instruction_2,heavy_hitter_instruction_3,heavy_hitter_instruction_4,heavy_hitter_instruction_5,heavy_hitter_instruction_6,heavy_hitter_instruction_7,heavy_hitter_instruction_8,heavy_hitter_instruction_9,heavy_hitter_instruction_10,heavy_hitter_time_1,heavy_hitter_time_2,heavy_hitter_time_3,heavy_hitter_time_4,heavy_hitter_time_5,heavy_hitter_time_6,heavy_hitter_time_7,heavy_hitter_time_8,heavy_hitter_time_9,heavy_hitter_time_10,heavy_hitter_count_1, heavy_hitter_count_2, heavy_hitter_count_3, heavy_hitter_count_4, heavy_hitter_count_5, heavy_hitter_count_6, heavy_hitter_count_7, heavy_hitter_count_8, heavy_hitter_count_9, heavy_hitter_count_10, errormsg," > "$testOut"
 
-ignoreHeader=true
-while IFS=',' read -r X weights_src residuals_out solver p d q P D Q s
+ignoreHeader=TRUE
+while IFS=',' read -r X weights_src residuals_out solver p d q P D Q s Xsize
 do
-  if test $ignoreHeader = true
+  if test $ignoreHeader = TRUE
   then
     ignoreHeader=false
   else
     dest_dml=$dml_out$residuals_out
     dest_r=$r_out$residuals_out
-    error_file=error_$solver$p$d$q$P$D$Q$s$(timestamp).txt
+    dash=_
+    txt=.txt
+    error_file=error_$(timestamp)_$solver$p$d$q$P$D$Q$s$dash$Xsize$txt
     error=false
-    errormsg=
-    dml_exec_time=NA
+    errormsg=NA
+    dml_execution_time=NA
     r_exec_time=NA
+    dml_elapsed_time=NA
+    r_run_time=NA
     dml_result=NA
     r_result=NA
+
 
     echo
     echo
     echo "RUN TEST FOR ARIMA("$p", "$d", "$q")("$P", "$D", "$Q") s="$s" with X="$X" weights_src="$weights_src "solver="$solver" and dest="$dest_dml
     echo
 
-    dml_output=$(spark-submit --driver-memory 4G --executor-memory 4G $systemml_jar -f $dml_path -nvargs X=$X weights_src=$weights_src p=$p d=$d q=$q P=$P D=$D Q=$Q s=$s solver=$solver residuals_out=$dest_dml -exec "singlenode")
+    dml_output=$(spark-submit --driver-memory $driver_memory --executor-memory $executor_memory $systemml_jar -f $dml_path -nvargs X=$X weights_src=$weights_src p=$p d=$d q=$q P=$P D=$D Q=$Q s=$s solver=$solver residuals_out=$dest_dml -exec $exec_mode -stats)
 
     echo
-    while read -r f1 f2 f3 f4
+
+    readheavyhitter=false
+    nHeavyhitter=0
+    heavyhitter_instruction=()
+    heavyhitter_time=()
+    heavyhitter_count=()
+    while read -r f1 f2 f3 f4 f5 f6
     do
-      #echo "1-$f1--2-$f2--3-$f3--4-$f4"
+      #echo "1-$f1--2-$f2--3-$f3--4-$f4--5-$f5--6-$f6"
       if [[ $f3 == "org.apache.sysml.runtime.DMLRuntimeException:" ]]
       then
-        error=true
+        error=TRUE
         errormsg="DMLRuntimeException: $f4"
       fi
       if [[ $f1 == "ERROR:" ]]
       then
-        error=true
+        error=TRUE
         errormsg=$f4
       fi
-      if [[ $f1 == "Total" ]]
+      if [[ $f2 == "elapsed" && $f3 == "time:" ]];
       then
-        dml_exec_time="$(cut -d' ' -f1 <<<$f4)" #cutting of 'sec' from f4)
+        dml_elapsed_time=$f4
+      fi
+      if [[ $f2 == "compilation" && $f3 == "time:" ]]
+      then
+        dml_compilation_time=$f4
+      fi
+      if [[ $f2 == "execution" && $f3 == "time:" ]]
+      then
+        dml_execution_time=$f4
       fi
       if [[ $f1 == "arima_css" ]]
       then
         dml_result=$f3
       fi
+
+      if test $readheavyhitter = TRUE
+      then
+        if [[ $nHeavyhitter -gt 0 && $nHeavyhitter -lt 11 ]]
+        then
+          heavyhitter_instruction[$nHeavyhitter]=$f2
+          heavyhitter_time[$nHeavyhitter]=$f3
+          heavyhitter_count[$nHeavyhitter]=$f4
+        fi
+        nHeavyhitter=$((nHeavyhitter+1))
+      fi
+
+      if [[ $f1 == "Heavy" && $f2 == "hitter" && $f3 == "instructions:" ]]
+      then
+        readheavyhitter=TRUE
+      fi
+
+
     done <<< "$dml_output"
     echo "DML finished"
+
+    # echo $readheavyhitter $nHeavyhitter
+    # echo $dml_elapsed_time
+    # echo $dml_compilation_time
+    # echo $dml_execution_time
+    printf "%s," ${heavyhitter_instruction[@]}
+    echo
+    printf "%s," ${heavyhitter_time[@]}
+    echo
+    printf "%s," ${heavyhitter_count[@]}
+    echo
 
     if test $dml_result = NA
     then
@@ -140,13 +199,11 @@ do
       errormsg="UNKNOWN ERROR: Error logs in $error_out$error_file"
     fi
 
-    if test $error = true
+    if test $error = TRUE
     then
-      dml_exec_time=NA
-      dml_result=NA
       echo "AN ERROR HAS OCCURED IN THE DML SCRIPT:"
       echo $errormsg
-      echo $dml_output >> "$error_out$error_file"
+      printf "%s\n" "$dml_output" >> "$error_out$error_file"
       if test $usehdfs = TRUE
       then
         hdfs dfs -copyFromLocal -f $error_out$error_file $error_out$error_file
@@ -160,7 +217,7 @@ do
 		# of the "Matrix" package, "methods" is loaded *but not
 		# attached* when run with Rscript. Therefore, we need to
 		# explicitly load it with Rscript.
-    r_output=$(Rscript --default-packages=methods,datasets,graphics,grDevices,stats,utils $r_path $X $weights_src "" $p $d $q $P $D $Q $s $dest_r $usehdfs)
+    r_output=$(Rscript --verbose --default-packages=methods,datasets,graphics,grDevices,stats,utils $r_path $X $weights_src "" $p $d $q $P $D $Q $s $dest_r $usehdfs)
 
     echo
     while read -r f1 f2 f3 f4
@@ -170,6 +227,12 @@ do
       then
         r_exec_time="$(cut -d'"' -f1 <<<$f3)" #cutting of double qoutes
       fi
+
+      if [[ $f2 == '"run_time:' ]]
+      then
+        r_run_time="$(cut -d'"' -f1 <<<$f3)" #cutting of double qoutes
+      fi
+
       if [[ $f2 == '"arima_css=' ]]
       then
         r_result="$(cut -d'"' -f1 <<<$f3)" #cutting of double qoutes
@@ -177,13 +240,17 @@ do
     done <<< "$r_output"
     echo "R finished"
 
-    echo "DML's execution time: $dml_exec_time"
+    echo "DML's execution time: $dml_execution_time"
     echo "R's execution time: $r_exec_time"
+    echo
+    echo "DML's run time: $dml_elapsed_time"
+    echo "R's run time: $r_run_time"
     echo
     echo "DML's result: $dml_result"
     echo "R's result: $r_result"
 
-    testsummary=$(printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" "${X}" "${weights_src}" "${residuals_out}" "${solver}" "${p}" "${d}" "${q}" "${P}" "${D}" "${Q}" "${s}" "${dml_exec_time}" "${dml_result}" "${r_exec_time}" "${r_result}" "${errormsg}")
+    testsummary=$(printf "%s," "${X}" "${weights_src}" "${residuals_out}" "${solver}" "${p}" "${d}" "${q}" "${P}" "${D}" "${Q}" "${s}" "${Xsize}" "${r_exec_time}" "${r_run_time}" "${r_result}" "${dml_elapsed_time}" "${dml_compilation_time}" "${dml_execution_time}" "${dml_result}" "${heavyhitter_instruction[@]}" "${heavyhitter_time[@]}" "${heavyhitter_count[@]}" "${errormsg}")
+    testsummary=$(printf "%s\n" "${testsummary}")
 
     echo
     echo $testsummary

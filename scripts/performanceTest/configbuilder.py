@@ -28,7 +28,7 @@ def configObject (tssize, solver, p, d, q, P, D, Q, s, i, ):
 
 def seasonalARIMA(tssize, solver, p, d, q, P, D, Q, s):
     sarima = base.copy()
-    if tssize =="G":
+    if tssize =="M":
         sarima = sarima.append(configObject(tssize, solver, p, d, q, P, D, Q, s, 1), ignore_index=True)
         for i in range(0, 51, 10):
             if i == 0:
@@ -69,23 +69,24 @@ def allConfigsForSize(solver, tssize):
     ma6 = ma(tssize, solver, 6)
     arima2 = arima(tssize, solver, 2, 1, 2)
     arima4 = arima(tssize, solver, 4, 1, 4)
-    #sar3 = sar(tssize, solver, 3, 3, 3)
-    #sar6 = sar(tssize, solver, 6, 6, 18)
-    #sma3 = sma(tssize, solver, 3, 3, 3)
-    #sma6 = sma(tssize, solver, 6, 6, 18)
-    # sarima2 = seasonalARIMA(tssize, solver, 2, 1, 2, 2, 1, 2, 6)
-    # sarima4 = seasonalARIMA(tssize, solver, 4, 1, 4, 4, 1, 4, 12)
+    sar3 = sar(tssize, solver, 3, 3, 3)
+    sar6 = sar(tssize, solver, 6, 6, 18)
+    sma3 = sma(tssize, solver, 3, 3, 3)
+    sma6 = sma(tssize, solver, 6, 6, 18)
+    sarima2 = seasonalARIMA(tssize, solver, 2, 1, 2, 2, 1, 2, 6)
+    sarima4 = seasonalARIMA(tssize, solver, 4, 1, 4, 4, 1, 4, 12)
 
-    return pd.concat([ar3, ar6, ma3, ma6, arima2, arima4], ignore_index=True)
+    #return pd.concat([ar3, ar6, ma3, ma6, arima2, arima4], ignore_index=True)
+    return pd.concat([ar3, ar6, ma3, ma6, arima2, arima4, sar3, sar6, sma3, sma6, sarima2, sarima4], ignore_index=True)
 
 
 def allConfigsForSolver(solver):
     all = allConfigsForSize(solver, "")
     allK = allConfigsForSize(solver, "K")
-    allM = allConfigsForSize(solver, "M")
-    someG = allConfigsForSize(solver, "G")
+    someM = allConfigsForSize(solver, "M")
+    #someG = allConfigsForSize(solver, "G")
     #return pd.concat([all], ignore_index=True)
-    return pd.concat([all, allK, allM, someG], ignore_index=True)
+    return pd.concat([all, allK, someM], ignore_index=True)
 
 
 

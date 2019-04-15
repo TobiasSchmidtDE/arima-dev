@@ -41,7 +41,7 @@ generateMultipleTS(1E0, timeseriesfolder, tsprefix, matrixsuffix, 0, 999, 50)
 generateMultipleTS(1E3, timeseriesfolder, tsprefix, "K"+matrixsuffix, 0, 999, 50)
 
 # This will generate about 250GB
-generateMultipleTS(1E6, timeseriesfolder, tsprefix, "M"+matrixsuffix, 0, 999, 50)
+generateMultipleTS(1E6, timeseriesfolder, tsprefix, "M"+matrixsuffix, 0, 51, 10)
 
 # About 5 TB
-generateMultipleTS(1E9, timeseriesfolder, tsprefix, "G"+matrixsuffix, 0, 101, 10)
+#generateMultipleTS(1E9, timeseriesfolder, tsprefix, "G"+matrixsuffix, 0, 101, 10)
